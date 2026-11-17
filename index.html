@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestione Sinistri Flotta – Sanitaservice ASL LE</title>
+<!-- Libreria Microsoft per l'autenticazione (MSAL). Se la rete la blocca, l'app parte in modalità dimostrativa. -->
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js" crossorigin="anonymous"></script>
+<style>
+:root{
+  --blu:#1f3a5f; --blu2:#2c5282; --fondo:#f4f6f9; --carta:#fff; --testo:#1c2430; --tenue:#5b6675;
+  --bordo:#d9dee6; --ok:#2f7d4f; --okbg:#e5f3ea; --wip:#9a6b00; --wipbg:#fdf3dc; --err:#b42318; --errbg:#fde8e6;
+  --np:#6b7280; --npbg:#eef0f3; --acc:#0f766e;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:var(--fondo);color:var(--testo)}
+header{background:var(--blu);color:#fff;display:flex;align-items:center;gap:16px;padding:10px 20px;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.2px}
+header .sub{font-size:12px;opacity:.8}
+header .user{margin-left:auto;font-size:12.5px;display:flex;gap:10px;align-items:center}
+header select{font-size:12.5px}
+nav{background:#fff;border-bottom:1px solid var(--bordo);display:flex;gap:2px;padding:0 14px;overflow-x:auto}
+nav a{padding:11px 14px;color:var(--tenue);text-decoration:none;border-bottom:3px solid transparent;white-space:nowrap}
+nav a.on{color:var(--blu);border-bottom-color:var(--blu);font-weight:600}
+main{max-width:1280px;margin:0 auto;padding:20px}
+h2{font-size:19px;margin:4px 0 14px;color:var(--blu)}
+h3{font-size:15px;margin:0 0 10px;color:var(--blu)}
+.card{background:var(--carta);border:1px solid var(--bordo);border-radius:8px;padding:16px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:#fff;border:1px solid var(--bordo);border-radius:8px;padding:14px}
+.kpi .v{font-size:26px;font-weight:700;color:var(--blu)}
+.kpi .l{font-size:12px;color:var(--tenue)}
+.kpi.alert .v{color:var(--err)}
+.pipe{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.pipe div{background:#eef3f9;border-radius:6px;padding:10px 6px;text-align:center}
+.pipe b{display:block;font-size:20px;color:var(--blu2)}
+.pipe span{font-size:11.5px;color:var(--tenue)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--tenue);border-bottom:2px solid var(--bordo);padding:7px 8px;white-space:nowrap}
+td{border-bottom:1px solid #edf0f4;padding:7px 8px;vertical-align:top}
+tr.click{cursor:pointer} tr.click:hover td{background:#f7f9fc}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.b-ok{background:var(--okbg);color:var(--ok)} .b-wip{background:var(--wipbg);color:var(--wip)}
+.b-err{background:var(--errbg);color:var(--err)} .b-np{background:var(--npbg);color:var(--np)}
+.b-todo{background:#eef3f9;color:var(--blu2)} .b-org{background:#fff1e0;color:#a5520b}
+.mono{font-family:Consolas,"Cascadia Mono",monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--blu2);background:var(--blu2);color:#fff;border-radius:6px;padding:7px 13px;font:inherit;cursor:pointer}
+.btn.sec{background:#fff;color:var(--blu2)} .btn.warn{background:#fff;color:var(--err);border-color:var(--err)}
+.btn.ok{background:var(--ok);border-color:var(--ok)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:4px 9px;font-size:12.5px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px 16px}
+.fld{display:flex;flex-direction:column;gap:4px}
+.fld.wide{grid-column:1/-1}
+.fld span{font-size:12.5px;color:var(--tenue);font-weight:600}
+.fld small{color:var(--tenue);font-size:11.5px}
+.req{color:var(--err)}
+input,select,textarea{font:inherit;border:1px solid var(--bordo);border-radius:6px;padding:7px 9px;background:#fff;color:var(--testo);width:100%}
+input:disabled,select:disabled,textarea:disabled{background:#f3f4f6;color:#4b5563}
+textarea{resize:vertical}
+.layout{display:grid;grid-template-columns:260px 1fr;gap:16px}
+@media(max-width:860px){.layout{grid-template-columns:1fr}.pipe{grid-template-columns:repeat(4,1fr)}}
+.steps button{display:flex;width:100%;align-items:center;gap:10px;text-align:left;background:#fff;border:1px solid var(--bordo);border-radius:7px;padding:9px 10px;margin-bottom:6px;cursor:pointer;font:inherit}
+.steps button.on{border-color:var(--blu2);box-shadow:0 0 0 2px #c9d8ec}
+.steps .n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.n.ok{background:var(--ok);color:#fff}.n.wip{background:#f2c14e;color:#3b2c00}.n.todo{background:#e3e8ef;color:var(--tenue)}.n.np{background:#c9ced6;color:#fff}
+.steps small{display:block;color:var(--tenue);font-size:11.5px}
+.head{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.head .t{font-size:20px;font-weight:700;color:var(--blu)}
+.muted{color:var(--tenue)} .small{font-size:12px}
+.alerts{display:flex;gap:6px;flex-wrap:wrap}
+.warnbox{background:var(--wipbg);border:1px solid #f0d58a;border-radius:6px;padding:8px 12px;margin:10px 0;font-size:13px}
+.errbox{background:var(--errbg);border:1px solid #f3b8b1;border-radius:6px;padding:8px 12px;margin:10px 0;font-size:13px}
+.infobox{background:#eef3f9;border:1px solid #c9d8ec;border-radius:6px;padding:10px 14px;margin:10px 0;font-size:13px}
+.att{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dashed #e5e8ee;font-size:13px}
+.att a{color:var(--blu2);cursor:pointer;text-decoration:underline}
+#toast{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
+#toast div{background:#1c2430;color:#fff;padding:10px 14px;border-radius:6px;max-width:420px;box-shadow:0 4px 14px rgba(0,0,0,.2);font-size:13px}
+#toast div.err{background:var(--err)}
+#busy{position:fixed;inset:0;background:rgba(255,255,255,.55);display:none;place-items:center;z-index:40;font-weight:600;color:var(--blu)}
+.demo{background:#fff1e0;color:#7a3e05;border-bottom:1px solid #f3c58f;padding:7px 20px;font-size:12.5px}
+.hint{font-size:12px;color:var(--tenue);margin-top:6px}
+code{background:#eef1f5;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Gestione Sinistri Flotta</h1><div class="sub">Sanitaservice ASL LE · Archivio su OneDrive</div></div>
+  <div class="user" id="userbox"></div>
+</header>
+<div id="demobar"></div>
+<nav id="nav"></nav>
+<main id="app"><div class="card">Caricamento in corso…</div></main>
+<div id="busy">Operazione in corso…</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   CONFIGURAZIONE — da compilare dopo la registrazione in Entra ID
+   (vedere ISTRUZIONI_INSTALLAZIONE.md). Con clientId vuoto l'app parte
+   in MODALITÀ DIMOSTRATIVA con dati fittizi salvati solo nel browser.
+   ===================================================================== */
+const CONFIG = {
+  tenantId: "",                 // ID directory (tenant) di Entra ID
+  clientId: "",                 // ID applicazione (client) della registrazione
+  redirectUri: window.location.origin + window.location.pathname,
+  archivio: { driveId: "", folderId: "" },  // drive e ID della cartella SINISTRI (si ricavano dalla schermata "Configurazione iniziale")
+  modalitaAllegati: "personale", // "personale": i file restano nel OneDrive di chi li carica; "centrale": vanno nella cartella SINISTRI
+  consolidaAllaChiusura: true,  // alla chiusura copia nel fascicolo centrale i file rimasti nei OneDrive personali
+  sogliaGiorniAlert: 10         // valore predefinito; modificabile da Impostazioni
+};
+const GRAPH = "https://graph.microsoft.com/v1.0";
+const SCOPES = ["User.Read", "Files.ReadWrite.All"];
+try { const s = JSON.parse(localStorage.getItem("sinistri_archivio") || "null"); if (s && !CONFIG.archivio.driveId) CONFIG.archivio = s; } catch (e) {}
+const DEMO = !CONFIG.clientId || typeof msal === "undefined";
+
+/* ======================= MODELLO DEL PROCESSO ======================= */
+const SI_NO = ["", "No", "Sì"];
+const PHASES = [
+ {k:"evento", dir:"01_EVENTO", t:"Apertura evento", fields:[
+   {id:"dataEvento",l:"Data evento",type:"date",req:1,lock:1},
+   {id:"oraEvento",l:"Ora evento",type:"time",req:1,lock:1},
+   {id:"targa",l:"Targa",type:"text",req:1,lock:1},
+   {id:"tipoMezzo",l:"Tipologia mezzo",type:"select",opts:["","Ambulanza MSB","Ambulanza MSA","Automedica","Auto di servizio","Mezzo aree verdi","Altro"]},
+   {id:"postazione",l:"Postazione / servizio",type:"text"},
+   {id:"conducente",l:"Conducente",type:"text"},
+   {id:"luogo",l:"Luogo dell'evento",type:"text",wide:1},
+   {id:"inEmergenza",l:"Evento durante servizio di emergenza",type:"select",opts:SI_NO},
+   {id:"mezzoFermo",l:"Mezzo fermo",type:"select",opts:SI_NO,req:1},
+   {id:"sintesi",l:"Sintesi dell'accaduto",type:"textarea",wide:1}
+ ]},
+ {k:"relazione", dir:"02_RELAZIONE", t:"Relazione e documentazione", fields:[
+   {id:"relazione",l:"Relazione descrittiva",type:"textarea",wide:1,req:1},
+   {id:"cai",l:"Constatazione amichevole (CAI)",type:"select",opts:["","Firmata da entrambi","Firmata solo dal nostro conducente","Non compilata"]},
+   {id:"autorita",l:"Autorità intervenuta",type:"select",opts:["","Nessuna","Polizia Locale","Carabinieri","Polizia Stradale","Altro"]},
+   {id:"verbale",l:"Estremi verbale",type:"text"},
+   {id:"feriti",l:"Presenza di feriti",type:"select",opts:SI_NO,hint:"Non riportare qui dati sanitari: eventuali referti vanno solo in allegato."},
+   {id:"controparte",l:"Controparte (nominativo, targa, compagnia)",type:"textarea",wide:1},
+   {id:"testimoni",l:"Testimoni",type:"textarea",wide:1}
+ ]},
+ {k:"assicurazione", dir:"03_ASSICURAZIONE_LEGALE", t:"Denuncia e legale", fields:[
+   {id:"compagnia",l:"Compagnia assicurativa",type:"text",req:1},
+   {id:"polizza",l:"N. polizza",type:"text"},
+   {id:"dataDenuncia",l:"Data denuncia",type:"date",req:1},
+   {id:"numSinistro",l:"N. sinistro compagnia",type:"text"},
+   {id:"emailCompagnia",l:"E-mail compagnia / liquidatore",type:"email"},
+   {id:"responsabilita",l:"Attribuzione responsabilità",type:"select",opts:["","Da definire","Torto","Ragione","Concorso"]},
+   {id:"avvocato",l:"Avvocato incaricato",type:"text"},
+   {id:"emailAvvocato",l:"E-mail avvocato",type:"email"},
+   {id:"dataIncaricoLegale",l:"Data incarico legale",type:"date"}
+ ]},
+ {k:"perizia", dir:"04_PERIZIA", t:"Perizia", np:1, fields:[
+   {id:"perito",l:"Perito / studio peritale",type:"text",req:1},
+   {id:"emailPerito",l:"E-mail perito",type:"email"},
+   {id:"dataIncaricoPerito",l:"Data incarico",type:"date"},
+   {id:"dataSopralluogo",l:"Data sopralluogo",type:"date"},
+   {id:"dataPerizia",l:"Data perizia",type:"date",req:1},
+   {id:"importoPeriziato",l:"Importo periziato (€)",type:"number"},
+   {id:"esitoPerizia",l:"Esito",type:"select",opts:["","Riparabile","Antieconomico / demolizione","Da integrare"]},
+   {id:"notePerizia",l:"Note",type:"textarea",wide:1}
+ ]},
+ {k:"preventivi", dir:"05_PREVENTIVI", t:"Preventivazione", np:1, list:1, fields:[
+   {id:"dataAutorizzazione",l:"Data autorizzazione riparazione",type:"date",req:1},
+   {id:"autorizzatoDa",l:"Autorizzato da",type:"text"},
+   {id:"importoAutorizzato",l:"Importo autorizzato (€)",type:"number"}
+ ]},
+ {k:"officina", dir:"06_OFFICINA", t:"Officina e riparazione", np:1, fields:[
+   {id:"officina",l:"Officina",type:"text",req:1},
+   {id:"dataIngresso",l:"Ingresso in officina",type:"date",req:1},
+   {id:"fineLavoriPrevista",l:"Fine lavori prevista",type:"date"},
+   {id:"fineLavoriEffettiva",l:"Fine lavori effettiva",type:"date",req:1},
+   {id:"dataRientro",l:"Rientro in servizio",type:"date",req:1},
+   {id:"noteOfficina",l:"Note",type:"textarea",wide:1}
+ ]},
+ {k:"chiusura", dir:"07_CHIUSURA", t:"Fattura e chiusura", fields:[
+   {id:"fornitore",l:"Officina fatturante",type:"text",req:1},
+   {id:"fatturaNumero",l:"N. fattura",type:"text",req:1},
+   {id:"fatturaData",l:"Data fattura",type:"date",req:1},
+   {id:"fatturaImporto",l:"Importo fattura (€)",type:"number",req:1},
+   {id:"rimborso",l:"Rimborso assicurativo (€)",type:"number"},
+   {id:"franchigia",l:"Franchigia / scoperto (€)",type:"number"},
+   {id:"dataChiusura",l:"Data chiusura pratica",type:"date",req:1},
+   {id:"esitoFinale",l:"Esito finale",type:"textarea",wide:1}
+ ]}
+];
+const PH = Object.fromEntries(PHASES.map(p => [p.k, p]));
+const ROLES = {AMM:"Amministratore", RESP:"Responsabile flotta", IST:"Istruttore di fase", CONS:"Consultazione"};
+
+/* ============================ UTILITÀ ============================== */
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const nowISO = () => new Date().toISOString();
+const todayISO = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
+const fmtD = s => s ? `${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(0,4)}` : "—";
+const fmtDT = s => s ? new Date(s).toLocaleString("it-IT",{dateStyle:"short",timeStyle:"short"}) : "—";
+const daysSince = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime())/86400000) : null;
+const diffDays = (a,b) => Math.round((new Date(b) - new Date(a))/86400000);
+const eur = n => (n === "" || n == null) ? "—" : Number(n).toLocaleString("it-IT",{style:"currency",currency:"EUR"});
+const safeName = n => n.replace(/[\\/:*?"<>|#%]/g, "_").trim();
+const encPath = segs => segs.map(encodeURIComponent).join("/");
+const clone = o => JSON.parse(JSON.stringify(o));
+function toast(msg, cls){ const d=document.createElement("div"); if(cls) d.className=cls; d.textContent=msg; $("#toast").appendChild(d); setTimeout(()=>d.remove(), cls==="err"?9000:4000); }
+function busy(on){ $("#busy").style.display = on ? "grid" : "none"; }
+function errMsg(e){ return (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || String(e); }
+async function pool(items, n, fn){ const out=new Array(items.length); let i=0;
+  await Promise.all(Array.from({length:Math.min(n,items.length)}, async()=>{ while(i<items.length){ const j=i++; try{ out[j]=await fn(items[j]); }catch(e){ out[j]={_err:e}; } } }));
+  return out; }
+
+/* ================== ARCHIVIO SU ONEDRIVE (Microsoft Graph) ================== */
+class GraphStore {
+  constructor(){
+    this.msal = new msal.PublicClientApplication({
+      auth:{ clientId:CONFIG.clientId, authority:`https://login.microsoftonline.com/${CONFIG.tenantId || "organizations"}`, redirectUri:CONFIG.redirectUri },
+      cache:{ cacheLocation:"sessionStorage" }
+    });
+  }
+  async init(){
+    const r = await this.msal.handleRedirectPromise();
+    this.account = r ? r.account : this.msal.getAllAccounts()[0];
+    if(!this.account){ await this.msal.loginRedirect({scopes:SCOPES}); return false; }
+    this.msal.setActiveAccount(this.account);
+    const me = await this.api("/me?$select=displayName,mail,userPrincipalName");
+    this.me = { nome: me.displayName, email: (me.mail || me.userPrincipalName).toLowerCase() };
+    return true;
+  }
+  logout(){ this.msal.logoutRedirect(); }
+  async token(){
+    try { return (await this.msal.acquireTokenSilent({scopes:SCOPES, account:this.account})).accessToken; }
+    catch(e){ await this.msal.acquireTokenRedirect({scopes:SCOPES}); throw e; }
+  }
+  async api(path, opt = {}){
+    const t = await this.token();
+    const res = await fetch(path.startsWith("http") ? path : GRAPH + path, {...opt, headers:{Authorization:"Bearer "+t, ...(opt.headers||{})}});
+    if(res.status === 204) return null;
+    if(!res.ok){ const e = new Error("Errore Graph " + res.status); e.status = res.status; try{ e.body = await res.json(); }catch(_){} throw e; }
+    const ct = res.headers.get("content-type") || "";
+    return ct.includes("json") ? res.json() : res;
+  }
+  get d(){ return CONFIG.archivio.driveId; }
+  get root(){ return `/drives/${CONFIG.archivio.driveId}/items/${CONFIG.archivio.folderId}`; }
+  async readJson(itemPath){ // ritorna {data, etag, id} oppure null se assente
+    try { const m = await this.api(itemPath); const r = await fetch(m["@microsoft.graph.downloadUrl"]); return {data: await r.json(), etag: m.eTag, id: m.id}; }
+    catch(e){ if(e.status === 404) return null; throw e; }
+  }
+  async putJson(path, obj, etag){
+    const h = {"Content-Type":"application/json"}; if(etag) h["If-Match"] = etag;
+    return this.api(path, {method:"PUT", headers:h, body: JSON.stringify(obj, null, 1)});
+  }
+  async ensureFolder(parentPath, name){
+    try { return await this.api(`${parentPath}/children`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name, folder:{}, "@microsoft.graph.conflictBehavior":"fail"})}); }
+    catch(e){ if(e.status === 409) return this.api(`${parentPath}:/${encodeURIComponent(name)}`); throw e; }
+  }
+  /* --- configurazione e utenti --- */
+  async loadConfig(){
+    const r = await this.readJson(`${this.root}:/_config/configurazione.json`);
+    if(!r) return null; this.cfgEtag = r.etag; return r.data;
+  }
+  async saveConfig(cfg){
+    if(!this.cfgEtag){ await this.ensureFolder(this.root, "_config");
+      const it = await this.putJson(`${this.root}:/_config/configurazione.json:/content`, cfg); this.cfgEtag = it.eTag; return; }
+    const it = await this.putJson(`${this.root}:/_config/configurazione.json:/content`, cfg, this.cfgEtag); this.cfgEtag = it.eTag;
+  }
+  async grantArchive(user){ // condivide la cartella SINISTRI con un collaboratore
+    const role = user.ruolo === "CONS" ? "read" : "write";
+    return this.api(`${this.root}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+      recipients:[{email:user.email}], roles:[role], requireSignIn:true, sendInvitation:true,
+      message:"Accesso all'archivio sinistri flotta di Sanitaservice ASL LE." })});
+  }
+  /* --- fascicoli --- */
+  async listSinistri(){
+    let url = `${this.root}/children?$top=999&$select=id,name,folder,webUrl`, kids = [];
+    while(url){ const r = await this.api(url); kids = kids.concat(r.value); url = r["@odata.nextLink"]; }
+    kids = kids.filter(k => k.folder && /^\d{8}-/.test(k.name));
+    const res = await pool(kids, 6, async k => {
+      const j = await this.readJson(`/drives/${this.d}/items/${k.id}:/sinistro.json`);
+      if(!j) return null;
+      return {...j.data, id:k.name, _etag:j.etag, _m:{folderItemId:k.id, fileId:j.id, webUrl:k.webUrl}};
+    });
+    const bad = res.filter(x => x && x._err); if(bad.length) toast(`${bad.length} fascicoli non leggibili (permessi o file danneggiato).`, "err");
+    return res.filter(x => x && !x._err);
+  }
+  async createSinistro(rec){
+    let name = rec.id, folder, i = 2;
+    for(;;){ try { folder = await this.api(`${this.root}/children`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name, folder:{}, "@microsoft.graph.conflictBehavior":"fail"})}); break; }
+      catch(e){ if(e.status === 409){ name = `${rec.id}_${i++}`; continue; } throw e; } }
+    rec.id = name; rec.codice = "SIN-" + name;
+    const fp = `/drives/${this.d}/items/${folder.id}`;
+    for(const p of PHASES) await this.ensureFolder(fp, p.dir);
+    const it = await this.putJson(`${fp}:/sinistro.json:/content?@microsoft.graph.conflictBehavior=fail`, strip(rec));
+    const out = {...rec, _etag:it.eTag, _m:{folderItemId:folder.id, fileId:it.id, webUrl:folder.webUrl}};
+    this.writeSummary(out); return out;
+  }
+  async saveSinistro(rec){
+    const it = await this.putJson(`/drives/${this.d}/items/${rec._m.fileId}/content`, strip(rec), rec._etag);
+    const out = {...rec, _etag:it.eTag}; this.writeSummary(out); return out;
+  }
+  writeSummary(rec){ // riepilogo leggibile per assicurazione e legale (best effort)
+    this.api(`/drives/${this.d}/items/${rec._m.folderItemId}:/RIEPILOGO.html:/content`, {method:"PUT", headers:{"Content-Type":"text/html"}, body: summaryHTML(rec)}).catch(()=>{});
+  }
+  /* --- allegati --- */
+  async uploadTo(base, file){
+    if(file.size <= 4*1024*1024)
+      return this.api(`${base}/content?@microsoft.graph.conflictBehavior=rename`, {method:"PUT", headers:{"Content-Type":file.type || "application/octet-stream"}, body:file});
+    const s = await this.api(`${base}/createUploadSession`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({item:{"@microsoft.graph.conflictBehavior":"rename"}})});
+    const CH = 320*1024*10; let last;
+    for(let o = 0; o < file.size; o += CH){
+      const end = Math.min(o+CH, file.size);
+      const r = await fetch(s.uploadUrl, {method:"PUT", headers:{"Content-Range":`bytes ${o}-${end-1}/${file.size}`}, body:file.slice(o,end)});
+      if(!r.ok) throw new Error("Caricamento interrotto (" + r.status + ")");
+      if(r.status === 200 || r.status === 201) last = await r.json();
+    }
+    return last;
+  }
+  async upload(rec, phase, file, utenti){
+    const name = safeName(file.name);
+    if(CONFIG.modalitaAllegati === "personale"){
+      const it = await this.uploadTo(`/me/drive/root:/${encPath(["SINISTRI", rec.id, phase.dir, name])}:`, file);
+      const drive = it.parentReference.driveId;
+      // il file resta nel OneDrive di chi lo carica ed è condiviso con gli utenti dell'applicazione
+      const gest = utenti.filter(u => u.attivo !== false && u.email !== this.me.email && (u.ruolo === "AMM" || u.ruolo === "RESP")).map(u => ({email:u.email}));
+      const altri = utenti.filter(u => u.attivo !== false && u.email !== this.me.email && !(u.ruolo === "AMM" || u.ruolo === "RESP")).map(u => ({email:u.email}));
+      const inv = (rc, role) => rc.length ? this.api(`/drives/${drive}/items/${it.id}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({recipients:rc, roles:[role], requireSignIn:true, sendInvitation:false})}) : null;
+      try { await inv(gest, "write"); await inv(altri, "read"); } catch(e){ toast("File caricato, ma condivisione non riuscita: " + errMsg(e), "err"); }
+      return {itemId:it.id, driveId:drive, name:it.name, size:it.size, webUrl:it.webUrl, origine:"personale"};
+    }
+    const it = await this.uploadTo(`/drives/${this.d}/items/${rec._m.folderItemId}:/${encPath([phase.dir, name])}:`, file);
+    return {itemId:it.id, driveId:this.d, name:it.name, size:it.size, webUrl:it.webUrl, origine:"centrale"};
+  }
+  openFile(ref){ if(ref.webUrl) window.open(ref.webUrl, "_blank", "noopener"); }
+  async consolida(rec){ // copia nel fascicolo centrale i file presenti nei OneDrive personali
+    let n = 0;
+    for(const p of PHASES){
+      const list = (rec.fasi[p.k] && rec.fasi[p.k].allegati) || [];
+      for(const ref of list){
+        if(ref.origine !== "personale") continue;
+        const dest = await this.ensureFolder(`/drives/${this.d}/items/${rec._m.folderItemId}`, p.dir);
+        const res = await this.api(`/drives/${ref.driveId}/items/${ref.itemId}/copy?@microsoft.graph.conflictBehavior=rename`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({parentReference:{driveId:this.d, id:dest.id}, name:ref.name})});
+        let newId = null; const loc = res && res.headers && res.headers.get("Location");
+        for(let k = 0; k < 20 && !newId; k++){
+          await new Promise(r => setTimeout(r, 1500));
+          if(loc){ try { const m = await (await fetch(loc)).json(); if(m.status === "completed") newId = m.resourceId; if(m.status === "failed") throw new Error("Copia non riuscita: " + ref.name); } catch(e){ if(/Copia/.test(e.message)) throw e; } }
+          else { try { const it = await this.api(`/drives/${this.d}/items/${dest.id}:/${encodeURIComponent(ref.name)}`); newId = it.id; } catch(_){} }
+        }
+        if(!newId) throw new Error("Copia non confermata entro il tempo previsto: " + ref.name);
+        const it = await this.api(`/drives/${this.d}/items/${newId}?$select=id,webUrl,name`);
+        Object.assign(ref, {copiaDa:{driveId:ref.driveId, itemId:ref.itemId}, itemId:it.id, driveId:this.d, webUrl:it.webUrl, name:it.name, origine:"centrale", consolidatoIl:nowISO()});
+        n++;
+      }
+    }
+    return n;
+  }
+  async share(rec, emails, role, scadenza, messaggio){
+    const body = {recipients:emails.map(e => ({email:e})), roles:[role], requireSignIn:true, sendInvitation:true, message:messaggio || ""};
+    if(scadenza) body.expirationDateTime = new Date(scadenza + "T23:59:59").toISOString();
+    return this.api(`/drives/${this.d}/items/${rec._m.folderItemId}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  }
+  /* --- configurazione iniziale --- */
+  async setupMyFolder(){
+    let it; try { it = await this.api("/me/drive/root:/SINISTRI"); }
+    catch(e){ if(e.status !== 404) throw e; it = await this.api("/me/drive/root/children", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name:"SINISTRI", folder:{}, "@microsoft.graph.conflictBehavior":"fail"})}); }
+    return {driveId: it.parentReference.driveId, folderId: it.id, webUrl: it.webUrl};
+  }
+}
+function strip(rec){ const o = clone(rec); delete o._etag; delete o._m; return o; }
+
+/* ============= MODALITÀ DIMOSTRATIVA (dati fittizi nel browser) ============= */
+class DemoStore {
+  constructor(){
+    this.key = "sinistri_demo_v1"; this.files = new Map();
+    try { this.db = JSON.parse(localStorage.getItem(this.key) || "null"); } catch(e){ this.db = null; }
+    if(!this.db){ this.db = demoSeed(); this.persist(); }
+  }
+  persist(){ try { localStorage.setItem(this.key, JSON.stringify(this.db)); } catch(e){} }
+  async init(){ let em = null; try { em = localStorage.getItem("sinistri_demo_user"); } catch(e){}
+    const u = this.db.config.utenti.find(x => x.email === em) || this.db.config.utenti[0]; this.me = {nome:u.nome, email:u.email}; return true; }
+  switchUser(email){ try { localStorage.setItem("sinistri_demo_user", email); } catch(e){} location.reload(); }
+  reset(){ try { localStorage.removeItem(this.key); } catch(e){} location.reload(); }
+  async loadConfig(){ return clone(this.db.config); }
+  async saveConfig(cfg){ this.db.config = clone(cfg); this.persist(); }
+  async grantArchive(){ return null; }
+  async listSinistri(){ return Object.values(this.db.sinistri).map(r => ({...clone(r.data), _etag:r.etag, _m:{}})); }
+  async createSinistro(rec){ let name = rec.id, i = 2; while(this.db.sinistri[name]) name = `${rec.id}_${i++}`; rec.id = name; rec.codice = "SIN-" + name;
+    this.db.sinistri[name] = {data:strip(rec), etag:"1"}; this.persist(); return {...rec, _etag:"1", _m:{}}; }
+  async saveSinistro(rec){ const cur = this.db.sinistri[rec.id];
+    if(cur.etag !== rec._etag){ const e = new Error("conflitto"); e.status = 412; throw e; }
+    cur.etag = String(+cur.etag + 1); cur.data = strip(rec); this.persist(); return {...rec, _etag:cur.etag}; }
+  async upload(rec, phase, file){ const id = "demo-" + Date.now() + "-" + Math.random().toString(36).slice(2,7);
+    this.files.set(id, URL.createObjectURL(file));
+    return {itemId:id, driveId:"demo", name:safeName(file.name), size:file.size, webUrl:null, origine:CONFIG.modalitaAllegati}; }
+  openFile(ref){ const u = this.files.get(ref.itemId); if(u) window.open(u, "_blank"); else toast("Modalità dimostrativa: il file non è conservato dopo il ricaricamento della pagina."); }
+  async consolida(rec){ let n = 0; for(const p of PHASES) for(const r of ((rec.fasi[p.k]||{}).allegati||[])) if(r.origine === "personale"){ r.origine = "centrale"; r.consolidatoIl = nowISO(); n++; } return n; }
+  async share(){ return {value:[]}; }
+}
+function demoSeed(){
+  const dAgo = n => { const d = new Date(Date.now() - n*86400000); return new Date(d - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
+  const tAgo = n => new Date(Date.now() - n*86400000).toISOString();
+  const utenti = [
+    {nome:"Mario Rossi (demo)", email:"amministratore@demo.local", ruolo:"AMM", fasi:[], attivo:true},
+    {nome:"Anna Bianchi (demo)", email:"flotta@demo.local", ruolo:"RESP", fasi:[], attivo:true},
+    {nome:"Luca Verdi (demo)", email:"relazioni@demo.local", ruolo:"IST", fasi:["relazione"], attivo:true},
+    {nome:"Sara Neri (demo)", email:"assicurazioni@demo.local", ruolo:"IST", fasi:["assicurazione","perizia"], attivo:true},
+    {nome:"Paolo Gallo (demo)", email:"officine@demo.local", ruolo:"IST", fasi:["preventivi","officina","chiusura"], attivo:true},
+    {nome:"Elena Conte (demo)", email:"consultazione@demo.local", ruolo:"CONS", fasi:[], attivo:true}
+  ];
+  const mk = (gg, targa, ora, extra) => { const de = dAgo(gg); const id = de.replace(/-/g,"") + "-" + targa;
+    const r = {id, codice:"SIN-"+id, esempio:true, creatoIl:tAgo(gg), creatoDa:"flotta@demo.local", blocco:{attivo:false}, storico:[{ts:tAgo(gg), da:"flotta@demo.local", azione:"Apertura fascicolo"}], condivisioni:[],
+      fasi:{evento:{dataEvento:de, oraEvento:ora, targa, tipoMezzo:"Ambulanza MSB", postazione:"Postazione di esempio", luogo:"Via di esempio", conducente:"Conducente di esempio", mezzoFermo:"Sì", stato:"completata", completataIl:tAgo(gg), completataDa:"flotta@demo.local", aggiornatoIl:tAgo(gg), aggiornatoDa:"flotta@demo.local", allegati:[]}}};
+    extra(r, tAgo); return r; };
+  const ok = (t, by) => ({stato:"completata", completataIl:t, completataDa:by, aggiornatoIl:t, aggiornatoDa:by, allegati:[]});
+  const list = [
+    mk(22, "ZZ101AA", "08:40", (r,t) => { r.fasi.relazione = {...ok(t(19),"relazioni@demo.local"), relazione:"Urto in fase di manovra nel piazzale (testo di esempio).", cai:"Firmata da entrambi", feriti:"No"};
+      r.fasi.assicurazione = {compagnia:"Compagnia di esempio", dataDenuncia:dAgo(16), aggiornatoIl:t(16), aggiornatoDa:"assicurazioni@demo.local", allegati:[]}; }),
+    mk(6, "ZZ102AA", "22:10", (r,t) => { r.fasi.relazione = {relazione:"Bozza di relazione (esempio).", aggiornatoIl:t(2), aggiornatoDa:"relazioni@demo.local", allegati:[]}; }),
+    mk(38, "ZZ103AA", "16:30", (r,t) => { r.fasi.relazione = {...ok(t(35),"relazioni@demo.local"), relazione:"Tamponamento in coda (esempio).", feriti:"No"};
+      r.fasi.assicurazione = {...ok(t(30),"assicurazioni@demo.local"), compagnia:"Compagnia di esempio", dataDenuncia:dAgo(34), emailCompagnia:"liquidatore@esempio.invalid", avvocato:"Avv. di esempio", emailAvvocato:"avvocato@esempio.invalid"};
+      r.fasi.perizia = {...ok(t(20),"assicurazioni@demo.local"), perito:"Studio peritale di esempio", dataPerizia:dAgo(21), importoPeriziato:2800, esitoPerizia:"Riparabile"};
+      r.fasi.preventivi = {elenco:[{officina:"Officina Esempio A", data:dAgo(19), importo:3120, giorni:12, scelto:true},{officina:"Officina Esempio B", data:dAgo(18), importo:3390, giorni:9, scelto:false}], aggiornatoIl:t(3), aggiornatoDa:"officine@demo.local", allegati:[]};
+      r.blocco = {attivo:true, motivo:"In attesa di autorizzazione della compagnia", dal:t(3), da:"flotta@demo.local"}; }),
+    mk(75, "ZZ104AA", "11:05", (r,t) => { r.fasi.evento.mezzoFermo = "Sì";
+      r.fasi.relazione = {...ok(t(72),"relazioni@demo.local"), relazione:"Danno da urto contro paletto (esempio).", feriti:"No"};
+      r.fasi.assicurazione = {...ok(t(70),"assicurazioni@demo.local"), compagnia:"Compagnia di esempio", dataDenuncia:dAgo(72)};
+      r.fasi.perizia = {stato:"np", aggiornatoIl:t(70), aggiornatoDa:"assicurazioni@demo.local", allegati:[]};
+      r.fasi.preventivi = {...ok(t(66),"officine@demo.local"), elenco:[{officina:"Officina Esempio C", data:dAgo(68), importo:950, giorni:4, scelto:true}], dataAutorizzazione:dAgo(66), importoAutorizzato:950};
+      r.fasi.officina = {...ok(t(58),"officine@demo.local"), officina:"Officina Esempio C", dataIngresso:dAgo(65), fineLavoriEffettiva:dAgo(60), dataRientro:dAgo(59)};
+      r.fasi.chiusura = {...ok(t(40),"officine@demo.local"), fornitore:"Officina Esempio C", fatturaNumero:"FT-0001", fatturaData:dAgo(45), fatturaImporto:950, dataChiusura:dAgo(40)}; }),
+    mk(1, "ZZ105AA", "19:50", () => {})
+  ];
+  return {config:{utenti, impostazioni:{sogliaGiorni:CONFIG.sogliaGiorniAlert}}, sinistri:Object.fromEntries(list.map(r => [r.id, {data:r, etag:"1"}]))};
+}
+
+/* ======================= REGOLE E STATI ======================= */
+const S = {store:null, me:null, user:null, cfg:null, recs:[], sel:{}, filtri:{}};
+const soglia = () => (S.cfg && S.cfg.impostazioni && +S.cfg.impostazioni.sogliaGiorni) || CONFIG.sogliaGiorniAlert;
+const isMgr = u => u && (u.ruolo === "AMM" || u.ruolo === "RESP");
+const canEdit = (u, k) => !!u && (isMgr(u) || (u.ruolo === "IST" && (u.fasi||[]).includes(k)));
+const canCreate = u => canEdit(u, "evento");
+function phaseState(rec, k){
+  const f = rec.fasi[k]; if(!f) return "todo";
+  if(f.stato === "completata") return "ok"; if(f.stato === "np") return "np";
+  const meta = ["allegati","stato","aggiornatoIl","aggiornatoDa","completataIl","completataDa"];
+  const has = Object.keys(f).some(x => !meta.includes(x) && f[x] !== "" && f[x] != null && !(Array.isArray(f[x]) && !f[x].length)) || (f.allegati||[]).length;
+  return has ? "wip" : "todo";
+}
+const STATE_LBL = {ok:"Istruita", wip:"In corso", todo:"Da avviare", np:"Non pertinente"};
+const STATE_CLS = {ok:"b-ok", wip:"b-wip", todo:"b-todo", np:"b-np"};
+const isClosed = rec => phaseState(rec, "chiusura") === "ok";
+const currentPhase = rec => PHASES.find(p => !["ok","np"].includes(phaseState(rec, p.k))) || null;
+function lastActivity(rec){
+  let t = rec.creatoIl || "";
+  for(const p of PHASES){ const f = rec.fasi[p.k]; if(f && f.aggiornatoIl && f.aggiornatoIl > t) t = f.aggiornatoIl; }
+  if(rec.blocco && rec.blocco.dal && rec.blocco.dal > t) t = rec.blocco.dal;
+  return t;
+}
+function alertsOf(rec){
+  if(isClosed(rec)) return [];
+  const a = [], idle = daysSince(lastActivity(rec));
+  if(idle > soglia()) a.push({c:"b-err", t:`Fermo da ${idle} gg`});
+  if(rec.blocco && rec.blocco.attivo) a.push({c:"b-org", t:"Bloccato"});
+  return a;
+}
+function statoLabel(rec){ if(isClosed(rec)) return {t:"Chiuso", c:"b-ok"}; const cp = currentPhase(rec); return {t: cp ? cp.t : "—", c:"b-wip"}; }
+function checks(rec){ // controlli di coerenza (non bloccanti, salvo date future)
+  const w = [], e = rec.fasi.evento || {}, o = rec.fasi.officina || {}, c = rec.fasi.chiusura || {}, a = rec.fasi.assicurazione || {}, oggi = todayISO();
+  const all = []; for(const p of PHASES) for(const f of p.fields) if(f.type === "date"){ const v = (rec.fasi[p.k]||{})[f.id]; if(v) all.push([f.l, v]); }
+  for(const [l,v] of all) if(v > oggi && !/prevista/i.test(l)) w.push(`${l}: data futura (${fmtD(v)}).`);
+  if(e.dataEvento){ for(const [l,v] of all) if(v < e.dataEvento && l !== "Data evento") w.push(`${l} anteriore alla data dell'evento.`); }
+  if(o.dataIngresso && o.fineLavoriEffettiva && o.fineLavoriEffettiva < o.dataIngresso) w.push("Fine lavori effettiva anteriore all'ingresso in officina.");
+  if(o.fineLavoriEffettiva && o.dataRientro && o.dataRientro < o.fineLavoriEffettiva) w.push("Rientro in servizio anteriore alla fine lavori.");
+  if(c.fatturaData && o.fineLavoriEffettiva && c.fatturaData < o.fineLavoriEffettiva) w.push("Fattura emessa prima della fine lavori effettiva.");
+  if(e.targa && !/^[A-Z]{2}\d{3}[A-Z]{2}$/.test(e.targa)) w.push("Targa non conforme al formato AA000AA (verificare se si tratta di targa speciale).");
+  const sc = ((rec.fasi.preventivi||{}).elenco||[]).find(x => x.scelto);
+  if(sc && c.fatturaImporto && +c.fatturaImporto > +sc.importo * 1.1) w.push(`Importo fattura superiore di oltre il 10% al preventivo scelto (${eur(sc.importo)}).`);
+  if(a.dataDenuncia && e.dataEvento && diffDays(e.dataEvento, a.dataDenuncia) > 3) w.push("Denuncia trasmessa oltre 3 giorni dall'evento: verificare il termine previsto dalla polizza (art. 1913 c.c.).");
+  return [...new Set(w)];
+}
+const giorniFermo = rec => { const e = rec.fasi.evento||{}, o = rec.fasi.officina||{}; if(e.mezzoFermo !== "Sì" || !e.dataEvento) return null; return diffDays(e.dataEvento, o.dataRientro || todayISO()); };
+function hasPersonal(rec){ return PHASES.some(p => ((rec.fasi[p.k]||{}).allegati||[]).some(r => r.origine === "personale")); }
+
+/* ========================= RIEPILOGO PER ESTERNI ========================= */
+function summaryHTML(rec){
+  let h = `<!DOCTYPE html><html lang="it"><meta charset="utf-8"><title>${esc(rec.codice)}</title><body style="font-family:Segoe UI,Arial;max-width:900px;margin:20px auto;color:#1c2430">
+  <h1 style="color:#1f3a5f;font-size:20px">Fascicolo sinistro ${esc(rec.codice)}</h1><p>Sanitaservice ASL LE · aggiornato il ${esc(fmtDT(nowISO()))} · stato: <b>${esc(statoLabel(rec).t)}</b></p>`;
+  for(const p of PHASES){ const f = rec.fasi[p.k] || {}; const st = phaseState(rec, p.k);
+    h += `<h2 style="font-size:15px;color:#1f3a5f;border-bottom:1px solid #ccc">${esc(p.t)} — ${esc(STATE_LBL[st])}</h2><table style="border-collapse:collapse;width:100%;font-size:13px">`;
+    for(const fd of p.fields){ const v = f[fd.id]; if(v === "" || v == null) continue; h += `<tr><td style="padding:3px 8px;color:#5b6675;width:35%">${esc(fd.l)}</td><td style="padding:3px 8px">${esc(fd.type==="date"?fmtD(v):fd.type==="number"?eur(v):v)}</td></tr>`; }
+    for(const x of (f.elenco||[])) h += `<tr><td style="padding:3px 8px;color:#5b6675">Preventivo${x.scelto?" (scelto)":""}</td><td style="padding:3px 8px">${esc(x.officina)} · ${esc(fmtD(x.data))} · ${esc(eur(x.importo))} · ${esc(x.giorni||"")} gg</td></tr>`;
+    if((f.allegati||[]).length) h += `<tr><td style="padding:3px 8px;color:#5b6675">Allegati</td><td style="padding:3px 8px">${f.allegati.map(a => esc(a.name) + (a.origine==="personale" ? " (in OneDrive del collaboratore)" : "")).join("<br>")}</td></tr>`;
+    h += `</table>`; }
+  return h + `<p style="font-size:11px;color:#5b6675;margin-top:24px">Documento generato automaticamente. Contiene dati personali: uso limitato alla gestione del sinistro.</p></body></html>`;
+}
+
+/* ============================ INTERFACCIA ============================ */
+function nav(){
+  const r = location.hash.split("/")[1] || "cruscotto";
+  const items = [["cruscotto","Cruscotto"],["archivio","Archivio e ricerca"]];
+  if(canCreate(S.user)) items.push(["nuovo","Nuovo sinistro"]);
+  if(S.user && S.user.ruolo === "AMM") items.push(["impostazioni","Utenti e impostazioni"]);
+  $("#nav").innerHTML = items.map(([k,l]) => `<a href="#/${k}" class="${r===k||(r==="sinistro"&&k==="archivio")?"on":""}">${l}</a>`).join("");
+}
+function userbox(){
+  if(!S.me){ $("#userbox").innerHTML = ""; return; }
+  let h = `<span>${esc(S.me.nome)}${S.user ? " · " + esc(ROLES[S.user.ruolo]) : ""}</span>`;
+  if(DEMO && S.cfg) h += `<select id="demoUser" title="Simula un altro utente">${S.cfg.utenti.map(u => `<option value="${esc(u.email)}" ${u.email===S.me.email?"selected":""}>${esc(u.nome)} – ${esc(ROLES[u.ruolo])}</option>`).join("")}</select>`;
+  else h += `<button class="btn sec sm" id="logout">Esci</button>`;
+  $("#userbox").innerHTML = h;
+  const du = $("#demoUser"); if(du) du.onchange = () => S.store.switchUser(du.value);
+  const lo = $("#logout"); if(lo) lo.onclick = () => S.store.logout();
+}
+function render(){
+  nav(); userbox();
+  const [, r, id] = location.hash.split("/");
+  const app = $("#app");
+  if(!S.user){ app.innerHTML = `<div class="card"><h3>Accesso non abilitato</h3><p>L'utente <b>${esc(S.me && S.me.email)}</b> non è censito tra i collaboratori dell'applicazione. Rivolgersi all'amministratore.</p></div>`; return; }
+  if(r === "archivio") return viewArchivio(app);
+  if(r === "nuovo") return viewNuovo(app);
+  if(r === "sinistro") return viewSinistro(app, decodeURIComponent(id || ""));
+  if(r === "impostazioni") return viewImpostazioni(app);
+  return viewCruscotto(app);
+}
+window.addEventListener("hashchange", render);
+
+/* ---------------- Cruscotto ---------------- */
+function viewCruscotto(app){
+  const open = S.recs.filter(r => !isClosed(r));
+  const alr = open.filter(r => alertsOf(r).length);
+  const anno = String(new Date().getFullYear());
+  const chiusiAnno = S.recs.filter(r => isClosed(r) && ((r.fasi.chiusura||{}).dataChiusura||"").startsWith(anno));
+  const fermi = open.filter(r => (r.fasi.evento||{}).mezzoFermo === "Sì" && !(r.fasi.officina||{}).dataRientro);
+  const conRientro = S.recs.filter(r => (r.fasi.evento||{}).mezzoFermo === "Sì" && (r.fasi.officina||{}).dataRientro);
+  const medio = conRientro.length ? Math.round(conRientro.reduce((s,r) => s + giorniFermo(r), 0) / conRientro.length) : null;
+  const rows = open.map(r => ({r, a:alertsOf(r), idle:daysSince(lastActivity(r)), age:daysSince((r.fasi.evento||{}).dataEvento)}))
+    .sort((x,y) => (y.a.length - x.a.length) || (y.idle - x.idle));
+  app.innerHTML = `
+  <h2>Cruscotto dei processi in itinere</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="v">${open.length}</div><div class="l">Sinistri in itinere</div></div>
+    <div class="kpi alert"><div class="v">${alr.length}</div><div class="l">In alert (fermi oltre ${soglia()} gg o bloccati)</div></div>
+    <div class="kpi"><div class="v">${fermi.length}</div><div class="l">Mezzi attualmente fermi</div></div>
+    <div class="kpi"><div class="v">${chiusiAnno.length}</div><div class="l">Pratiche chiuse nel ${anno}</div></div>
+    <div class="kpi"><div class="v">${medio == null ? "—" : medio + " gg"}</div><div class="l">Fermo medio mezzi (pratiche con rientro)</div></div>
+  </div>
+  <div class="card"><h3>Distribuzione per fase corrente</h3>
+    <div class="pipe">${PHASES.map(p => `<div><b>${open.filter(r => (currentPhase(r)||{}).k === p.k).length}</b><span>${esc(p.t)}</span></div>`).join("")}</div>
+  </div>
+  <div class="card"><h3>Processi in itinere</h3>
+  ${rows.length ? `<table><thead><tr><th>Fascicolo</th><th>Targa</th><th>Data evento</th><th>Fase corrente</th><th>Ultimo avanzamento</th><th>Gg senza avanzamento</th><th>Gg dall'evento</th><th>Alert</th></tr></thead><tbody>
+    ${rows.map(({r,a,idle,age}) => `<tr class="click" data-id="${esc(r.id)}"><td class="mono">${esc(r.id)}</td><td class="mono">${esc((r.fasi.evento||{}).targa)}</td><td>${fmtD((r.fasi.evento||{}).dataEvento)}</td>
+      <td><span class="badge b-wip">${esc((currentPhase(r)||{}).t||"—")}</span></td><td>${fmtDT(lastActivity(r))}</td><td><b>${idle}</b></td><td>${age ?? "—"}</td>
+      <td><div class="alerts">${a.map(x => `<span class="badge ${x.c}" title="${esc(x.t==="Bloccato" ? (r.blocco.motivo||"") : "")}">${esc(x.t)}</span>`).join("") || '<span class="muted small">—</span>'}</div></td></tr>`).join("")}
+  </tbody></table>` : `<p class="muted">Nessun processo in itinere.</p>`}
+  <p class="hint">Alert rosso: nessun avanzamento registrato da oltre ${soglia()} giorni su un fascicolo non chiuso. Alert arancione: fascicolo dichiarato bloccato da un collaboratore (motivo visibile passando sul badge).</p>
+  </div>`;
+  app.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => location.hash = "#/sinistro/" + encodeURIComponent(tr.dataset.id));
+}
+
+/* ---------------- Archivio e ricerca ---------------- */
+function viewArchivio(app){
+  const F = S.filtri;
+  app.innerHTML = `<h2>Archivio e ricerca</h2>
+  <div class="card"><div class="row">
+    <label class="fld" style="flex:2;min-width:220px"><span>Ricerca libera</span><input id="q" value="${esc(F.q||"")}" placeholder="conducente, luogo, compagnia, officina, n. sinistro…"></label>
+    <label class="fld" style="width:130px"><span>Targa</span><input id="qt" value="${esc(F.t||"")}"></label>
+    <label class="fld" style="width:170px"><span>Stato</span><select id="qs">${[["","Tutti"],["aperti","In itinere"],["alert","In alert"],["chiusi","Chiusi"]].map(([v,l]) => `<option value="${v}" ${F.s===v?"selected":""}>${l}</option>`).join("")}</select></label>
+    <label class="fld" style="width:150px"><span>Evento dal</span><input type="date" id="qd1" value="${esc(F.d1||"")}"></label>
+    <label class="fld" style="width:150px"><span>Evento al</span><input type="date" id="qd2" value="${esc(F.d2||"")}"></label>
+    <button class="btn sec" id="csv">Esporta CSV</button><button class="btn sec" id="reload">Aggiorna dati</button>
+  </div></div><div class="card" id="res"></div>`;
+  const run = () => {
+    Object.assign(F, {q:$("#q").value.trim().toLowerCase(), t:$("#qt").value.trim().toUpperCase(), s:$("#qs").value, d1:$("#qd1").value, d2:$("#qd2").value});
+    const list = filtra();
+    $("#res").innerHTML = list.length ? `<p class="muted small">${list.length} fascicoli</p><table><thead><tr><th>Fascicolo</th><th>Targa</th><th>Data evento</th><th>Conducente</th><th>Stato</th><th>Compagnia</th><th>Officina</th><th>Gg fermo</th><th>Alert</th></tr></thead><tbody>
+      ${list.map(r => { const e = r.fasi.evento||{}, s = statoLabel(r), gf = giorniFermo(r);
+        return `<tr class="click" data-id="${esc(r.id)}"><td class="mono">${esc(r.id)}</td><td class="mono">${esc(e.targa)}</td><td>${fmtD(e.dataEvento)} ${esc(e.oraEvento||"")}</td><td>${esc(e.conducente||"—")}</td>
+        <td><span class="badge ${s.c}">${esc(s.t)}</span></td><td>${esc((r.fasi.assicurazione||{}).compagnia||"—")}</td><td>${esc((r.fasi.officina||{}).officina||"—")}</td><td>${gf ?? "—"}</td>
+        <td>${alertsOf(r).map(x => `<span class="badge ${x.c}">${esc(x.t)}</span>`).join(" ")}</td></tr>`; }).join("")}</tbody></table>` : `<p class="muted">Nessun fascicolo corrisponde ai criteri.</p>`;
+    $("#res").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => location.hash = "#/sinistro/" + encodeURIComponent(tr.dataset.id));
+  };
+  ["q","qt","qs","qd1","qd2"].forEach(i => $("#"+i).addEventListener("input", run));
+  $("#csv").onclick = () => esportaCSV(filtra());
+  $("#reload").onclick = async () => { await carica(); render(); };
+  run();
+}
+function filtra(){
+  const F = S.filtri;
+  return S.recs.filter(r => {
+    const e = r.fasi.evento || {};
+    if(F.t && !(e.targa||"").includes(F.t)) return false;
+    if(F.d1 && (e.dataEvento||"") < F.d1) return false;
+    if(F.d2 && (e.dataEvento||"") > F.d2) return false;
+    if(F.s === "aperti" && isClosed(r)) return false;
+    if(F.s === "chiusi" && !isClosed(r)) return false;
+    if(F.s === "alert" && !alertsOf(r).length) return false;
+    if(F.q){ const blob = JSON.stringify(r.fasi).toLowerCase() + " " + r.id.toLowerCase(); if(!blob.includes(F.q)) return false; }
+    return true;
+  }).sort((a,b) => (b.fasi.evento.dataEvento||"").localeCompare(a.fasi.evento.dataEvento||""));
+}
+function esportaCSV(list){
+  const cols = [["Fascicolo", r => r.id], ["Stato", r => statoLabel(r).t], ["Bloccato", r => r.blocco && r.blocco.attivo ? "Sì: " + (r.blocco.motivo||"") : ""], ["Ultimo avanzamento", r => fmtDT(lastActivity(r))]];
+  for(const p of PHASES){ cols.push([p.t + " – stato", r => STATE_LBL[phaseState(r,p.k)]]); for(const f of p.fields) cols.push([f.l, r => (r.fasi[p.k]||{})[f.id] ?? ""]); }
+  cols.push(["Preventivo scelto", r => { const s = ((r.fasi.preventivi||{}).elenco||[]).find(x => x.scelto); return s ? `${s.officina} ${s.importo}` : ""; }]);
+  const q = v => `"${String(v).replace(/"/g,'""').replace(/\r?\n/g," ")}"`;
+  const csv = "﻿" + [cols.map(c => q(c[0])).join(";"), ...list.map(r => cols.map(c => q(c[1](r))).join(";"))].join("\r\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv;charset=utf-8"})); a.download = `sinistri_${todayISO()}.csv`; a.click();
+}
+
+/* ---------------- Nuovo sinistro ---------------- */
+function viewNuovo(app){
+  if(!canCreate(S.user)){ app.innerHTML = `<div class="card">Profilo non abilitato all'apertura di nuovi fascicoli.</div>`; return; }
+  const fl = PH.evento.fields;
+  app.innerHTML = `<h2>Apertura nuovo sinistro</h2><div class="card">
+   <div class="infobox">Il fascicolo sarà creato in <code>\\SINISTRI\\AAAAMMGG-TARGA</code> con le sottocartelle di fase (${PHASES.map(p => p.dir).join(", ")}). Data, ora e targa, una volta salvate, non sono più modificabili perché determinano il nome della cartella.</div>
+   <div class="grid" id="frm">${fl.map(f => fieldHTML(f, f.id === "dataEvento" ? todayISO() : "", false, true)).join("")}</div>
+   <div class="row" style="margin-top:14px"><button class="btn" id="crea">Crea fascicolo</button></div></div>`;
+  $("#f_targa").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,""); });
+  $("#crea").onclick = async () => {
+    const v = collect($("#frm"));
+    const miss = fl.filter(f => f.req && !v[f.id]).map(f => f.l);
+    if(miss.length) return toast("Campi obbligatori mancanti: " + miss.join(", "), "err");
+    if(v.dataEvento > todayISO()) return toast("La data dell'evento non può essere futura.", "err");
+    if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(v.oraEvento)) return toast("Ora non valida (formato 24 ore HH:MM).", "err");
+    if(!/^[A-Z]{2}\d{3}[A-Z]{2}$/.test(v.targa) && !confirm("La targa non rispetta il formato AA000AA. Confermare?")) return;
+    const dup = S.recs.find(r => r.fasi.evento.targa === v.targa && r.fasi.evento.dataEvento === v.dataEvento);
+    if(dup && !confirm(`Esiste già il fascicolo ${dup.id} per la stessa targa e data. Si tratta di un evento distinto?`)) return;
+    const t = nowISO();
+    const rec = {id: v.dataEvento.replace(/-/g,"") + "-" + v.targa, creatoIl:t, creatoDa:S.me.email, blocco:{attivo:false}, condivisioni:[],
+      storico:[{ts:t, da:S.me.email, azione:"Apertura fascicolo"}],
+      fasi:{evento:{...v, aggiornatoIl:t, aggiornatoDa:S.me.email, allegati:[]}}};
+    busy(true);
+    try { const saved = await S.store.createSinistro(rec); S.recs.push(saved); toast("Fascicolo " + saved.id + " creato."); location.hash = "#/sinistro/" + encodeURIComponent(saved.id); }
+    catch(e){ toast("Creazione non riuscita: " + errMsg(e), "err"); } finally { busy(false); }
+  };
+}
+
+/* ---------------- Fascicolo ---------------- */
+function fieldHTML(f, val, dis, isNew){
+  const v = val ?? ""; const d = (dis || (f.lock && !isNew)) ? "disabled" : "";
+  const c = `id="f_${f.id}" data-f="${f.id}" ${d}`;
+  let inp;
+  if(f.type === "textarea") inp = `<textarea ${c} rows="4">${esc(v)}</textarea>`;
+  else if(f.type === "select") inp = `<select ${c}>${f.opts.map(o => `<option value="${esc(o)}" ${o===v?"selected":""}>${o?esc(o):"—"}</option>`).join("")}</select>`;
+  else inp = `<input type="${f.type}" ${f.type==="number"?'step="0.01" min="0"':""} ${f.type==="date"&&!/prevista/i.test(f.l)?`max="${todayISO()}"`:""} ${c} value="${esc(v)}">`;
+  return `<label class="fld ${f.wide?"wide":""}"><span>${esc(f.l)}${f.req?' <b class="req">*</b>':""}</span>${inp}${f.hint?`<small>${esc(f.hint)}</small>`:""}</label>`;
+}
+function collect(root){ const o = {}; root.querySelectorAll("[data-f]").forEach(el => { if(!el.disabled) o[el.dataset.f] = el.type === "number" ? (el.value === "" ? "" : +el.value) : el.value.trim(); }); return o; }
+function collectPrev(){ return [...document.querySelectorAll("#prev tbody tr")].map(tr => ({
+  officina:tr.querySelector('[data-p="officina"]').value.trim(), data:tr.querySelector('[data-p="data"]').value,
+  importo:tr.querySelector('[data-p="importo"]').value === "" ? "" : +tr.querySelector('[data-p="importo"]').value,
+  giorni:tr.querySelector('[data-p="giorni"]').value === "" ? "" : +tr.querySelector('[data-p="giorni"]').value,
+  scelto:tr.querySelector('[data-p="scelto"]').checked })).filter(x => x.officina || x.importo !== ""); }
+
+function viewSinistro(app, id){
+  const rec = S.recs.find(r => r.id === id);
+  if(!rec){ app.innerHTML = `<div class="card">Fascicolo non trovato. <a href="#/archivio">Torna all'archivio</a></div>`; return; }
+  const k = S.sel[id] || (currentPhase(rec) || PH.chiusura).k, p = PH[k], f = rec.fasi[k] || {}, st = phaseState(rec, k);
+  const ed = canEdit(S.user, k) && !(st === "ok" || st === "np");
+  const e = rec.fasi.evento || {}, s = statoLabel(rec), al = alertsOf(rec), w = checks(rec), gf = giorniFermo(rec);
+  app.innerHTML = `
+  <div class="card"><div class="head">
+    <div><div class="t mono">${esc(rec.codice || rec.id)}</div>
+      <div class="muted">Targa <b class="mono">${esc(e.targa)}</b> · evento del ${fmtD(e.dataEvento)} ore ${esc(e.oraEvento)} · ${esc(e.tipoMezzo||"")}${gf != null ? ` · fermo mezzo: <b>${gf} gg</b>` : ""}</div>
+      <div class="alerts" style="margin-top:6px"><span class="badge ${s.c}">${esc(s.t)}</span>${al.map(x => `<span class="badge ${x.c}">${esc(x.t)}</span>`).join("")}</div>
+      ${rec.blocco && rec.blocco.attivo ? `<div class="warnbox"><b>Fascicolo bloccato</b> dal ${fmtDT(rec.blocco.dal)} (${esc(rec.blocco.da)}): ${esc(rec.blocco.motivo)}</div>` : ""}
+    </div>
+    <div class="row" style="margin-left:auto">
+      ${rec._m && rec._m.webUrl ? `<a class="btn sec sm" href="${esc(rec._m.webUrl)}" target="_blank" rel="noopener">Apri cartella OneDrive</a>` : ""}
+      ${(isMgr(S.user) || canEdit(S.user, k)) && !isClosed(rec) ? `<button class="btn ${rec.blocco&&rec.blocco.attivo?"sec":"warn"} sm" id="blocco">${rec.blocco&&rec.blocco.attivo?"Rimuovi blocco":"Segnala blocco"}</button>` : ""}
+    </div></div></div>
+  <div class="layout">
+    <aside class="steps">${PHASES.map((q,i) => { const qs = phaseState(rec, q.k), qf = rec.fasi[q.k] || {};
+      return `<button data-k="${q.k}" class="${q.k===k?"on":""}"><span class="n ${qs}">${qs==="ok"?"✓":qs==="np"?"–":i+1}</span><span>${esc(q.t)}<small>${esc(STATE_LBL[qs])}${qf.aggiornatoIl?" · "+fmtD(qf.aggiornatoIl.slice(0,10)):""}</small></span></button>`; }).join("")}
+    </aside>
+    <section>
+      <div class="card" id="phase">
+        <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">${esc(p.t)}</h3><span class="badge ${STATE_CLS[st]}">${esc(STATE_LBL[st])}</span></div>
+        <p class="muted small">${f.aggiornatoIl ? `Ultimo aggiornamento ${fmtDT(f.aggiornatoIl)} – ${esc(f.aggiornatoDa)}` : "Fase non ancora avviata"}${f.completataIl ? ` · istruita il ${fmtDT(f.completataIl)} da ${esc(f.completataDa)}` : ""}${!canEdit(S.user,k) ? " · <b>sola lettura per il proprio profilo</b>" : ""}</p>
+        ${p.list ? prevHTML(f.elenco || [], ed) : ""}
+        <div class="grid">${p.fields.map(fd => fieldHTML(fd, f[fd.id], !ed)).join("")}</div>
+        ${w.length ? `<div class="warnbox"><b>Controlli di coerenza</b><br>${w.map(esc).join("<br>")}</div>` : ""}
+        <h3 style="margin-top:16px">Documenti della fase</h3>
+        <div>${(f.allegati||[]).map((a,i) => `<div class="att"><a data-open="${i}">${esc(a.name)}</a><span class="badge ${a.origine==="personale"?"b-org":"b-ok"}">${a.origine==="personale"?"OneDrive del collaboratore":"Archivio centrale"}</span><span class="muted small">${esc(a.caricatoDa||"")} · ${fmtDT(a.caricatoIl)}</span>${ed?`<button class="btn sec sm" data-del="${i}" style="margin-left:auto">Rimuovi dal fascicolo</button>`:""}</div>`).join("") || '<p class="muted small">Nessun documento.</p>'}</div>
+        ${ed ? `<div class="row" style="margin-top:8px"><input type="file" id="files" multiple style="max-width:420px"><span class="hint">Destinazione: ${CONFIG.modalitaAllegati==="personale" ? `il proprio OneDrive, in <code>\\SINISTRI\\${esc(rec.id)}\\${p.dir}</code>, con condivisione automatica agli utenti dell'applicazione` : `<code>\\SINISTRI\\${esc(rec.id)}\\${p.dir}</code> dell'archivio centrale`}</span></div>` : ""}
+        <div class="row" style="margin-top:16px">
+          ${ed ? `<button class="btn" data-save="save">Salva</button><button class="btn ok" data-save="complete">Salva e segna come istruita</button>${p.np?`<button class="btn sec" data-save="np">Dichiara non pertinente</button>`:""}` : ""}
+          ${(st === "ok" || st === "np") && isMgr(S.user) && !(k !== "chiusura" && isClosed(rec)) ? `<button class="btn sec" data-save="reopen">Riapri fase</button>` : ""}
+        </div>
+      </div>
+      ${isMgr(S.user) ? shareHTML(rec) : ""}
+      <div class="card"><h3>Storico del fascicolo</h3><table><tbody>${(rec.storico||[]).slice().reverse().slice(0,40).map(x => `<tr><td style="width:150px">${fmtDT(x.ts)}</td><td style="width:220px" class="muted">${esc(x.da)}</td><td>${esc(x.azione)}</td></tr>`).join("")}</tbody></table></div>
+    </section>
+  </div>`;
+  app.querySelectorAll(".steps button").forEach(b => b.onclick = () => { S.sel[id] = b.dataset.k; render(); });
+  app.querySelectorAll("[data-save]").forEach(b => b.onclick = () => salvaFase(id, k, b.dataset.save));
+  app.querySelectorAll("[data-open]").forEach(a => a.onclick = () => S.store.openFile(f.allegati[+a.dataset.open]));
+  app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const a = f.allegati[+b.dataset.del]; if(confirm(`Rimuovere "${a.name}" dal fascicolo? Il file resta su OneDrive.`)) salvaFase(id, k, "save", {remove:+b.dataset.del}); });
+  const fi = $("#files"); if(fi) fi.onchange = () => caricaFile(id, k, [...fi.files]);
+  const bl = $("#blocco"); if(bl) bl.onclick = () => toggleBlocco(id);
+  const addp = $("#addPrev"); if(addp) addp.onclick = () => { $("#prev tbody").insertAdjacentHTML("beforeend", prevRow({}, true)); };
+  if(isMgr(S.user)) bindShare(rec);
+}
+function prevRow(x, ed){ const d = ed ? "" : "disabled";
+  return `<tr><td><input data-p="officina" value="${esc(x.officina||"")}" ${d}></td><td><input type="date" data-p="data" value="${esc(x.data||"")}" ${d}></td><td><input type="number" step="0.01" min="0" data-p="importo" value="${esc(x.importo??"")}" ${d}></td><td><input type="number" min="0" data-p="giorni" value="${esc(x.giorni??"")}" ${d}></td><td style="text-align:center"><input type="radio" name="scelto" data-p="scelto" ${x.scelto?"checked":""} ${d} style="width:auto"></td></tr>`; }
+function prevHTML(list, ed){
+  return `<h3 style="font-size:14px">Preventivi delle officine</h3><table id="prev"><thead><tr><th>Officina</th><th>Data</th><th>Importo (€)</th><th>Giorni lavoro</th><th>Scelto</th></tr></thead><tbody>${(list.length?list:(ed?[{}]:[])).map(x => prevRow(x, ed)).join("")}</tbody></table>
+  ${ed ? `<button class="btn sec sm" id="addPrev" style="margin:8px 0 14px">+ Aggiungi preventivo</button>` : "<br>"}`;
+}
+async function persist(id, mutate, okMsg){
+  const rec = S.recs.find(r => r.id === id); const nr = clone(rec); nr._m = rec._m; nr._etag = rec._etag;
+  const res = mutate(nr); if(res === false) return false;
+  busy(true);
+  try { const saved = await S.store.saveSinistro(nr); S.recs[S.recs.findIndex(r => r.id === id)] = saved; if(okMsg) toast(okMsg); return saved; }
+  catch(e){ if(e.status === 412){ toast("Il fascicolo è stato aggiornato da un altro collaboratore nel frattempo. I dati sono stati ricaricati: ripetere l'operazione.", "err"); await carica(); }
+    else toast("Salvataggio non riuscito: " + errMsg(e), "err"); return false; }
+  finally { busy(false); render(); }
+}
+async function salvaFase(id, k, mode, opt = {}){
+  const p = PH[k], panel = $("#phase");
+  const vals = mode === "reopen" ? {} : collect(panel);
+  const elenco = p.list && mode !== "reopen" ? collectPrev() : null;
+  const rec = S.recs.find(r => r.id === id);
+  if(mode === "complete"){
+    const merged = {...(rec.fasi[k]||{}), ...vals};
+    const miss = p.fields.filter(fd => fd.req && (merged[fd.id] === "" || merged[fd.id] == null)).map(fd => fd.l);
+    if(p.list && !(elenco||[]).some(x => x.scelto)) miss.push("preventivo scelto");
+    if(miss.length) return toast("Per istruire la fase mancano: " + miss.join(", "), "err");
+    if(k === "chiusura"){ const pend = PHASES.filter(q => q.k !== "chiusura" && !["ok","np"].includes(phaseState(rec, q.k))).map(q => q.t);
+      if(pend.length) return toast("Prima della chiusura vanno istruite o dichiarate non pertinenti le fasi: " + pend.join(", "), "err"); }
+  }
+  for(const fd of p.fields) if(fd.type === "date" && vals[fd.id] && vals[fd.id] > todayISO() && !/prevista/i.test(fd.l)) return toast(`${fd.l}: la data non può essere futura.`, "err");
+  if(mode === "np" && !confirm(`Dichiarare la fase "${p.t}" non pertinente per questo sinistro?`)) return;
+  const t = nowISO();
+  const saved = await persist(id, nr => {
+    const f = {...(nr.fasi[k] || {allegati:[]}), ...vals}; if(!f.allegati) f.allegati = [];
+    if(elenco) f.elenco = elenco;
+    if(opt.remove != null){ const a = f.allegati.splice(opt.remove, 1)[0]; nr.storico.push({ts:t, da:S.me.email, azione:`${p.t}: rimosso dal fascicolo il documento "${a.name}"`}); }
+    if(opt.add) f.allegati.push(...opt.add);
+    const az = {save:"aggiornata", complete:"istruita", np:"dichiarata non pertinente", reopen:"riaperta"}[mode];
+    if(mode === "complete"){ f.stato = "completata"; f.completataIl = t; f.completataDa = S.me.email; }
+    if(mode === "np"){ f.stato = "np"; f.completataIl = t; f.completataDa = S.me.email; }
+    if(mode === "reopen"){ f.stato = ""; delete f.completataIl; delete f.completataDa; }
+    f.aggiornatoIl = t; f.aggiornatoDa = S.me.email; nr.fasi[k] = f;
+    if(opt.add) nr.storico.push({ts:t, da:S.me.email, azione:`${p.t}: caricati ${opt.add.length} documenti (${opt.add.map(a => a.name).join(", ")})`});
+    else if(opt.remove == null) nr.storico.push({ts:t, da:S.me.email, azione:`Fase "${p.t}" ${az}`});
+    if(k === "chiusura" && mode === "complete" && nr.blocco) nr.blocco.attivo = false;
+  }, mode === "complete" ? "Fase istruita." : "Dati salvati.");
+  if(saved && k === "chiusura" && mode === "complete" && CONFIG.consolidaAllaChiusura && hasPersonal(saved)) consolida(id, true);
+}
+async function caricaFile(id, k, files){
+  if(!files.length) return; const rec = S.recs.find(r => r.id === id), p = PH[k], refs = [];
+  busy(true);
+  try { for(const file of files){ const ref = await S.store.upload(rec, p, file, S.cfg.utenti); ref.caricatoDa = S.me.email; ref.caricatoIl = nowISO(); refs.push(ref); } }
+  catch(e){ toast("Caricamento non riuscito: " + errMsg(e), "err"); }
+  finally { busy(false); }
+  if(refs.length) await salvaFase(id, k, "save", {add:refs});
+}
+async function toggleBlocco(id){
+  const rec = S.recs.find(r => r.id === id), on = rec.blocco && rec.blocco.attivo;
+  let motivo = "";
+  if(!on){ motivo = prompt("Indicare il motivo del blocco (es. in attesa di perizia, documentazione mancante):"); if(!motivo) return; }
+  const t = nowISO();
+  await persist(id, nr => { nr.blocco = on ? {attivo:false, rimossoIl:t, rimossoDa:S.me.email} : {attivo:true, motivo, dal:t, da:S.me.email};
+    nr.storico.push({ts:t, da:S.me.email, azione: on ? "Blocco rimosso" : "Segnalato blocco: " + motivo}); }, on ? "Blocco rimosso." : "Blocco segnalato.");
+}
+function shareHTML(rec){
+  const a = rec.fasi.assicurazione || {}, pe = rec.fasi.perizia || {};
+  const sugg = [a.emailCompagnia, a.emailAvvocato, pe.emailPerito].filter(Boolean).join(", ");
+  return `<div class="card"><h3>Condivisione con assicurazione, legale e perito</h3>
+   <p class="small muted">Invia un invito di OneDrive alla cartella <code>\\SINISTRI\\${esc(rec.id)}</code> (con il file RIEPILOGO.html sempre aggiornato). Il destinatario deve autenticarsi; per gli indirizzi esterni all'organizzazione la condivisione esterna deve essere abilitata dall'amministratore del tenant.</p>
+   ${hasPersonal(rec) ? `<div class="warnbox">Alcuni documenti si trovano ancora nel OneDrive personale dei collaboratori e non sono visibili ai destinatari esterni. Consolidarli prima di condividere. <button class="btn sec sm" id="cons">Consolida ora nell'archivio centrale</button></div>` : ""}
+   <div class="grid">
+     <label class="fld wide"><span>Destinatari (e-mail separate da virgola)</span><input id="shTo" value="${esc(sugg)}"></label>
+     <label class="fld"><span>Permesso</span><select id="shRole"><option value="read">Sola lettura</option><option value="write">Lettura e caricamento documenti</option></select></label>
+     <label class="fld"><span>Scadenza accesso (facoltativa)</span><input type="date" id="shExp" min="${todayISO()}"></label>
+     <label class="fld wide"><span>Messaggio</span><input id="shMsg" value="Sanitaservice ASL LE – documentazione relativa al sinistro ${esc(rec.codice||rec.id)}."></label>
+   </div>
+   <div class="row" style="margin-top:10px"><button class="btn" id="shGo">Invia invito</button></div>
+   ${(rec.condivisioni||[]).length ? `<table style="margin-top:12px"><thead><tr><th>Data</th><th>Destinatari</th><th>Permesso</th><th>Scadenza</th><th>Da</th></tr></thead><tbody>${rec.condivisioni.map(c => `<tr><td>${fmtDT(c.ts)}</td><td>${esc(c.a.join(", "))}</td><td>${c.ruolo==="write"?"Lettura e caricamento":"Sola lettura"}</td><td>${fmtD(c.scadenza)}</td><td class="muted">${esc(c.da)}</td></tr>`).join("")}</tbody></table>` : ""}
+  </div>`;
+}
+function bindShare(rec){
+  const c = $("#cons"); if(c) c.onclick = () => consolida(rec.id, false);
+  $("#shGo").onclick = async () => {
+    const to = $("#shTo").value.split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+    if(!to.length || to.some(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x))) return toast("Indicare indirizzi e-mail validi.", "err");
+    const role = $("#shRole").value, exp = $("#shExp").value, msg = $("#shMsg").value;
+    if(!confirm(`Inviare l'invito di accesso al fascicolo ${rec.id} a: ${to.join(", ")} (${role==="write"?"lettura e caricamento":"sola lettura"})?`)) return;
+    busy(true);
+    try { await S.store.share(rec, to, role, exp, msg); }
+    catch(e){ busy(false); return toast("Invito non riuscito: " + errMsg(e), "err"); }
+    busy(false);
+    const t = nowISO();
+    await persist(rec.id, nr => { (nr.condivisioni = nr.condivisioni || []).push({ts:t, da:S.me.email, a:to, ruolo:role, scadenza:exp||""});
+      nr.storico.push({ts:t, da:S.me.email, azione:`Fascicolo condiviso con ${to.join(", ")} (${role==="write"?"lettura e caricamento":"sola lettura"})`}); }, "Invito inviato.");
+  };
+}
+async function consolida(id, auto){
+  const rec = S.recs.find(r => r.id === id); const nr = clone(rec); nr._m = rec._m; nr._etag = rec._etag;
+  busy(true); let n = 0;
+  try { n = await S.store.consolida(nr); }
+  catch(e){ toast("Consolidamento interrotto: " + errMsg(e) + ". I file già copiati restano nell'archivio; ripetere l'operazione.", "err"); }
+  finally { busy(false); }
+  if(!n) return;
+  await persist(id, x => { x.fasi = nr.fasi; x.storico.push({ts:nowISO(), da:S.me.email, azione:`${auto?"Consolidamento automatico alla chiusura":"Consolidamento"}: ${n} documenti copiati nell'archivio centrale`}); }, `${n} documenti copiati nell'archivio centrale.`);
+}
+
+/* ---------------- Utenti e impostazioni ---------------- */
+function viewImpostazioni(app){
+  if(S.user.ruolo !== "AMM"){ app.innerHTML = `<div class="card">Sezione riservata all'amministratore.</div>`; return; }
+  const U = clone(S.cfg.utenti);
+  const draw = () => {
+    app.innerHTML = `<h2>Utenti e impostazioni</h2>
+    <div class="card"><h3>Collaboratori e autorizzazioni</h3>
+    <p class="small muted">Amministratore: tutte le fasi, utenti, condivisione. Responsabile flotta: tutte le fasi e condivisione. Istruttore: solo le fasi spuntate (la fase "Apertura evento" abilita all'apertura dei fascicoli). Consultazione: sola lettura.</p>
+    <table><thead><tr><th>Nominativo</th><th>E-mail (account Microsoft 365)</th><th>Profilo</th>${PHASES.map((p,i) => `<th title="${esc(p.t)}">F${i+1}</th>`).join("")}<th>Attivo</th><th></th></tr></thead><tbody>
+    ${U.map((u,i) => `<tr><td><input data-u="${i}" data-k="nome" value="${esc(u.nome)}"></td><td><input data-u="${i}" data-k="email" value="${esc(u.email)}"></td>
+      <td><select data-u="${i}" data-k="ruolo">${Object.entries(ROLES).map(([k,l]) => `<option value="${k}" ${u.ruolo===k?"selected":""}>${l}</option>`).join("")}</select></td>
+      ${PHASES.map(p => `<td style="text-align:center"><input type="checkbox" style="width:auto" data-u="${i}" data-ph="${p.k}" ${u.ruolo!=="IST"?"disabled":""} ${(u.ruolo==="AMM"||u.ruolo==="RESP"||(u.fasi||[]).includes(p.k))?"checked":""}></td>`).join("")}
+      <td style="text-align:center"><input type="checkbox" style="width:auto" data-u="${i}" data-k="attivo" ${u.attivo!==false?"checked":""}></td>
+      <td>${u.email !== S.me.email ? `<button class="btn sec sm" data-rm="${i}">Elimina</button>` : ""}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="hint">F1–F7: ${PHASES.map((p,i) => `F${i+1} ${esc(p.t)}`).join(" · ")}</p>
+    <div class="row" style="margin-top:10px"><button class="btn sec" id="addU">+ Aggiungi collaboratore</button><button class="btn" id="saveU">Salva utenti</button></div>
+    ${DEMO ? "" : `<p class="hint">Al salvataggio, ai nuovi collaboratori viene inviato l'invito di OneDrive alla cartella SINISTRI (modifica; sola lettura per il profilo Consultazione). La revoca dell'accesso alla cartella si effettua da OneDrive, "Gestisci accesso".</p>`}
+    </div>
+    <div class="card"><h3>Impostazioni</h3><div class="grid">
+      <label class="fld"><span>Soglia alert (giorni senza avanzamento)</span><input type="number" min="1" id="soglia" value="${soglia()}"></label>
+      <div class="fld"><span>Modalità archiviazione documenti</span><div>${CONFIG.modalitaAllegati === "personale" ? "OneDrive personale del collaboratore, con consolidamento " + (CONFIG.consolidaAllaChiusura ? "automatico alla chiusura" : "manuale") : "Archivio centrale"}</div><small>Si modifica nel blocco CONFIG del file.</small></div>
+      <div class="fld"><span>Archivio</span><div class="mono small">${DEMO ? "modalità dimostrativa (browser locale)" : "driveId " + esc(CONFIG.archivio.driveId) + "<br>folderId " + esc(CONFIG.archivio.folderId)}</div></div>
+    </div><div class="row" style="margin-top:10px"><button class="btn" id="saveS">Salva impostazioni</button>${DEMO ? `<button class="btn warn" id="resetDemo">Ripristina dati dimostrativi</button>` : ""}</div></div>`;
+    app.querySelectorAll("[data-u]").forEach(el => el.onchange = () => { const u = U[+el.dataset.u];
+      if(el.dataset.ph){ u.fasi = u.fasi || []; if(el.checked) u.fasi.push(el.dataset.ph); else u.fasi = u.fasi.filter(x => x !== el.dataset.ph); }
+      else if(el.dataset.k === "attivo") u.attivo = el.checked;
+      else { u[el.dataset.k] = el.dataset.k === "email" ? el.value.trim().toLowerCase() : el.value.trim(); if(el.dataset.k === "ruolo") draw(); } });
+    app.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { if(confirm("Eliminare il collaboratore dall'applicazione?")){ U.splice(+b.dataset.rm, 1); draw(); } });
+    $("#addU").onclick = () => { U.push({nome:"", email:"", ruolo:"IST", fasi:[], attivo:true, nuovo:true}); draw(); };
+    $("#saveU").onclick = async () => {
+      const bad = U.find(u => !u.nome || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(u.email));
+      if(bad) return toast("Ogni collaboratore deve avere nominativo ed e-mail validi.", "err");
+      if(new Set(U.map(u => u.email)).size !== U.length) return toast("E-mail duplicate.", "err");
+      if(!U.some(u => u.ruolo === "AMM" && u.attivo !== false)) return toast("Deve restare almeno un amministratore attivo.", "err");
+      const prev = new Set(S.cfg.utenti.map(u => u.email));
+      const nuovi = U.filter(u => !prev.has(u.email));
+      U.forEach(u => { delete u.nuovo; if(u.ruolo !== "IST") u.fasi = []; });
+      await salvaConfig({...S.cfg, utenti:U});
+      for(const u of nuovi){ try { await S.store.grantArchive(u); } catch(e){ toast(`Invito alla cartella non riuscito per ${u.email}: ${errMsg(e)}`, "err"); } }
+    };
+    $("#saveS").onclick = () => { const v = +$("#soglia").value; if(!(v >= 1)) return toast("Soglia non valida.", "err"); salvaConfig({...S.cfg, impostazioni:{...(S.cfg.impostazioni||{}), sogliaGiorni:v}}); };
+    const rd = $("#resetDemo"); if(rd) rd.onclick = () => { if(confirm("Cancellare i dati dimostrativi e ripristinare gli esempi?")) S.store.reset(); };
+  };
+  draw();
+}
+async function salvaConfig(cfg){
+  busy(true);
+  try { await S.store.saveConfig(cfg); S.cfg = cfg; S.user = cfg.utenti.find(u => u.email === S.me.email && u.attivo !== false) || null; toast("Configurazione salvata."); }
+  catch(e){ toast(e.status === 412 ? "Configurazione modificata da un altro amministratore: ricaricare la pagina." : "Salvataggio non riuscito: " + errMsg(e), "err"); }
+  finally { busy(false); render(); }
+}
+
+/* ---------------- Configurazione iniziale (solo modalità OneDrive) ---------------- */
+function viewSetup(){
+  nav(); userbox(); $("#nav").innerHTML = "";
+  $("#app").innerHTML = `<h2>Configurazione iniziale dell'archivio</h2><div class="card">
+   <p>L'archivio non è ancora configurato. Questa operazione va eseguita <b>una sola volta</b> dal titolare della cartella <code>SINISTRI</code> (account Microsoft 365 aziendale).</p>
+   <ol><li>Premere il pulsante: la cartella <code>SINISTRI</code> viene individuata o creata nella radice del proprio OneDrive.</li>
+   <li>Copiare i due valori nel blocco <code>CONFIG.archivio</code> del file e ripubblicarlo, così che tutti i collaboratori puntino allo stesso archivio.</li>
+   <li>Al primo accesso il titolare viene registrato come Amministratore e può censire i collaboratori.</li></ol>
+   <button class="btn" id="mk">Individua o crea la cartella SINISTRI nel mio OneDrive</button><div id="out"></div></div>`;
+  $("#mk").onclick = async () => { busy(true);
+    try { const r = await S.store.setupMyFolder();
+      $("#out").innerHTML = `<div class="infobox">Cartella: <a href="${esc(r.webUrl)}" target="_blank" rel="noopener">${esc(r.webUrl)}</a><br><code>archivio: { driveId: "${esc(r.driveId)}", folderId: "${esc(r.folderId)}" }</code></div>
+        <button class="btn sec" id="use">Usa questi valori in questo browser (prova)</button>`;
+      $("#use").onclick = () => { try { localStorage.setItem("sinistri_archivio", JSON.stringify({driveId:r.driveId, folderId:r.folderId})); } catch(e){} location.reload(); };
+    } catch(e){ toast(errMsg(e), "err"); } finally { busy(false); } };
+}
+function viewPrimoAvvio(){
+  $("#app").innerHTML = `<div class="card"><h3>Primo avvio</h3><p>Nella cartella dell'archivio non è presente il file di configurazione degli utenti. Confermando, <b>${esc(S.me.nome)}</b> (${esc(S.me.email)}) viene registrato come Amministratore.</p><button class="btn" id="boot">Conferma e prosegui</button></div>`;
+  $("#boot").onclick = async () => { await salvaConfig({versione:1, utenti:[{nome:S.me.nome, email:S.me.email, ruolo:"AMM", fasi:[], attivo:true}], impostazioni:{sogliaGiorni:CONFIG.sogliaGiorniAlert}}); await carica(); render(); };
+}
+
+/* ============================== AVVIO ============================== */
+async function carica(){ busy(true); try { S.recs = await S.store.listSinistri(); } catch(e){ toast("Lettura archivio non riuscita: " + errMsg(e), "err"); } finally { busy(false); } }
+async function start(){
+  if(DEMO) $("#demobar").innerHTML = `<div class="demo"><b>Modalità dimostrativa</b> – dati fittizi conservati solo in questo browser. Per collegare OneDrive compilare il blocco CONFIG (vedere le istruzioni di installazione). Il selettore in alto a destra simula i diversi profili.</div>`;
+  try {
+    S.store = DEMO ? new DemoStore() : new GraphStore();
+    if(!(await S.store.init())) return;
+    S.me = S.store.me;
+    if(!DEMO && !(CONFIG.archivio.driveId && CONFIG.archivio.folderId)) return viewSetup();
+    S.cfg = await S.store.loadConfig();
+    if(!S.cfg){ userbox(); return viewPrimoAvvio(); }
+    S.user = S.cfg.utenti.find(u => u.email === S.me.email && u.attivo !== false) || null;
+    if(S.user) await carica();
+    if(!location.hash) location.hash = "#/cruscotto"; else render();
+  } catch(e){ $("#app").innerHTML = `<div class="card errbox"><b>Avvio non riuscito.</b> ${esc(errMsg(e))}</div>`; }
+}
+start();
+</script>
+</body>
+</html>
