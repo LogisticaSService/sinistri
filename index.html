@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gestione Sinistri Flotta – Sanitaservice ASL LE</title>
 <!-- Libreria Microsoft per l'autenticazione (MSAL). Se la rete la blocca, l'app parte in modalità dimostrativa. -->
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js" crossorigin="anonymous"></script>
+<script src="msal-browser.min.js"></script>
 <style>
 :root{
   --blu:#1f3a5f; --blu2:#2c5282; --fondo:#f4f6f9; --carta:#fff; --testo:#1c2430; --tenue:#5b6675;
@@ -114,7 +114,7 @@ const CONFIG = {
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite.All"];
 try { const s = JSON.parse(localStorage.getItem("sinistri_archivio") || "null"); if (s && !CONFIG.archivio.driveId) CONFIG.archivio = s; } catch (e) {}
-const DEMO = !CONFIG.clientId || typeof msal === "undefined";
+const DEMO = !CONFIG.clientId;
 
 /* ======================= MODELLO DEL PROCESSO ======================= */
 const SI_NO = ["", "No", "Sì"];
