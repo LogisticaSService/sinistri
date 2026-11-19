@@ -113,7 +113,8 @@ const CONFIG = {
 };
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite.All"];
-try { const s = JSON.parse(localStorage.getItem("sinistri_archivio") || "null"); if (s && !CONFIG.archivio.driveId) CONFIG.archivio = s; } catch (e) {}
+let ARCH_LOCALE = false;
+try { const s = JSON.parse(localStorage.getItem("sinistri_archivio") || "null"); if (s && !CONFIG.archivio.driveId){ CONFIG.archivio = s; ARCH_LOCALE = true; } } catch (e) {}
 const DEMO = !CONFIG.clientId;
 
 /* ======================= MODELLO DEL PROCESSO ======================= */
@@ -203,7 +204,8 @@ const encPath = segs => segs.map(encodeURIComponent).join("/");
 const clone = o => JSON.parse(JSON.stringify(o));
 function toast(msg, cls){ const d=document.createElement("div"); if(cls) d.className=cls; d.textContent=msg; $("#toast").appendChild(d); setTimeout(()=>d.remove(), cls==="err"?9000:4000); }
 function busy(on){ $("#busy").style.display = on ? "grid" : "none"; }
-function errMsg(e){ return (e && e.body && e.body.error && e.body.error.message) || (e && e.message) || String(e); }
+function errMsg(e){ const er = e && e.body && e.body.error; if(er){ let c = []; let ie = er.innerError || er.innererror; while(ie){ if(ie.code) c.push(ie.code); ie = ie.innerError || ie.innererror; } return er.message + " [" + [er.code].concat(c).filter(Boolean).join(" / ") + (e.status ? " – HTTP " + e.status : "") + "]"; } return (e && e.message) || String(e); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function pool(items, n, fn){ const out=new Array(items.length); let i=0;
   await Promise.all(Array.from({length:Math.min(n,items.length)}, async()=>{ while(i<items.length){ const j=i++; try{ out[j]=await fn(items[j]); }catch(e){ out[j]={_err:e}; } } }));
   return out; }
@@ -265,8 +267,7 @@ class GraphStore {
   async grantArchive(user){ // condivide la cartella SINISTRI con un collaboratore
     const role = user.ruolo === "CONS" ? "read" : "write";
     return this.api(`${this.root}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
-      recipients:[{email:user.email}], roles:[role], requireSignIn:true, sendInvitation:true,
-      message:"Accesso all'archivio sinistri flotta di Sanitaservice ASL LE." })});
+      recipients:[{email:user.email}], roles:[role], requireSignIn:true, sendInvitation:false, retainInheritedPermissions:true })});
   }
   /* --- fascicoli --- */
   async listSinistri(){
@@ -321,7 +322,7 @@ class GraphStore {
       // il file resta nel OneDrive di chi lo carica ed è condiviso con gli utenti dell'applicazione
       const gest = utenti.filter(u => u.attivo !== false && u.email !== this.me.email && (u.ruolo === "AMM" || u.ruolo === "RESP")).map(u => ({email:u.email}));
       const altri = utenti.filter(u => u.attivo !== false && u.email !== this.me.email && !(u.ruolo === "AMM" || u.ruolo === "RESP")).map(u => ({email:u.email}));
-      const inv = (rc, role) => rc.length ? this.api(`/drives/${drive}/items/${it.id}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({recipients:rc, roles:[role], requireSignIn:true, sendInvitation:false})}) : null;
+      const inv = (rc, role) => rc.length ? this.api(`/drives/${drive}/items/${it.id}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({recipients:rc, roles:[role], requireSignIn:true, sendInvitation:false, retainInheritedPermissions:true})}) : null;
       try { await inv(gest, "write"); await inv(altri, "read"); } catch(e){ toast("File caricato, ma condivisione non riuscita: " + errMsg(e), "err"); }
       return {itemId:it.id, driveId:drive, name:it.name, size:it.size, webUrl:it.webUrl, origine:"personale"};
     }
@@ -351,10 +352,45 @@ class GraphStore {
     }
     return n;
   }
-  async share(rec, emails, role, scadenza, messaggio){
-    const body = {recipients:emails.map(e => ({email:e})), roles:[role], requireSignIn:true, sendInvitation:true, message:messaggio || ""};
+  async share(rec, emails, role, scadenza){
+    // collegamento "persone specifiche": valido solo per i destinatari indicati, che verificano la propria identità con un codice ricevuto sulla loro casella.
+    // Nessuna e-mail viene inviata da Microsoft: il collegamento è trasmesso dall'utente con la posta aziendale o la PEC.
+    const body = {type: role === "write" ? "edit" : "view", scope:"users", recipients:emails.map(e => ({email:e})), sendNotification:false, retainInheritedPermissions:true};
     if(scadenza) body.expirationDateTime = new Date(scadenza + "T23:59:59").toISOString();
-    return this.api(`/drives/${this.d}/items/${rec._m.folderItemId}/invite`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const r = await this.api(`/drives/${this.d}/items/${rec._m.folderItemId}/createLink`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    return {link: r && r.link && r.link.webUrl, id: r && r.id};
+  }
+  /* --- recupero dei fascicoli creati per errore in archivi personali --- */
+  async findImportabili(){
+    let root; try { root = await this.api("/me/drive/root:/SINISTRI"); } catch(e){ if(e.status === 404) return []; throw e; }
+    const myDrive = root.parentReference.driveId;
+    if(root.id === CONFIG.archivio.folderId) return [];
+    let url = `/drives/${myDrive}/items/${root.id}/children?$top=999&$select=id,name,folder`, kids = [];
+    while(url){ const r = await this.api(url); kids = kids.concat(r.value); url = r["@odata.nextLink"]; }
+    kids = kids.filter(k => k.folder && /^\d{8}-/.test(k.name) && !/_IMPORTATO$/.test(k.name));
+    const res = await pool(kids, 6, async k => { const j = await this.readJson(`/drives/${myDrive}/items/${k.id}:/sinistro.json`); return j ? {nome:k.name, itemId:k.id, driveId:myDrive, data:j.data} : null; });
+    return res.filter(x => x && !x._err);
+  }
+  async importa(item, existing){
+    let name = item.nome, i = 2; while(existing.has(name)) name = `${item.nome}_${i++}`;
+    await this.api(`/drives/${item.driveId}/items/${item.itemId}/copy`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({parentReference:{driveId:this.d, id:CONFIG.archivio.folderId}, name})});
+    let folder = null, meta = null;
+    for(let k = 0; k < 40 && !meta; k++){ await sleep(1500);
+      try { folder = folder || await this.api(`${this.root}:/${encodeURIComponent(name)}`); meta = await this.api(`/drives/${this.d}/items/${folder.id}:/sinistro.json`); }
+      catch(e){ if(e.status !== 404) throw e; } }
+    if(!meta) throw new Error("copia non completata entro il tempo previsto per " + item.nome);
+    const rec = {...clone(item.data), id:name, codice:"SIN-" + name, _etag:meta.eTag, _m:{folderItemId:folder.id, fileId:meta.id, webUrl:folder.webUrl}};
+    let mancanti = 0;
+    for(const p of PHASES) for(const ref of ((rec.fasi[p.k]||{}).allegati||[])){
+      if(ref.driveId !== item.driveId) continue;
+      let it = null;
+      for(let k = 0; k < 10 && !it; k++){ try { it = await this.api(`/drives/${this.d}/items/${folder.id}:/${encPath([p.dir, ref.name])}`); } catch(e){ if(e.status !== 404) throw e; await sleep(1500); } }
+      if(it) Object.assign(ref, {copiaDa:{driveId:ref.driveId, itemId:ref.itemId}, itemId:it.id, driveId:this.d, webUrl:it.webUrl, origine:"centrale"}); else mancanti++;
+    }
+    (rec.storico = rec.storico || []).push({ts:nowISO(), da:this.me.email, azione:`Fascicolo importato nell'archivio centrale dal OneDrive di ${this.me.email}${name !== item.nome ? ` (rinominato da ${item.nome}: esisteva già un fascicolo con lo stesso nome)` : ""}${mancanti ? `; ${mancanti} documenti non ritrovati nella copia` : ""}`});
+    const saved = await this.saveSinistro(rec);
+    try { await this.api(`/drives/${item.driveId}/items/${item.itemId}`, {method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name: item.nome + "_IMPORTATO"})}); } catch(_){}
+    return {saved, rinominato: name !== item.nome, mancanti};
   }
   /* --- configurazione iniziale --- */
   async setupMyFolder(){
@@ -391,7 +427,8 @@ class DemoStore {
     return {itemId:id, driveId:"demo", name:safeName(file.name), size:file.size, webUrl:null, origine:CONFIG.modalitaAllegati}; }
   openFile(ref){ const u = this.files.get(ref.itemId); if(u) window.open(u, "_blank"); else toast("Modalità dimostrativa: il file non è conservato dopo il ricaricamento della pagina."); }
   async consolida(rec){ let n = 0; for(const p of PHASES) for(const r of ((rec.fasi[p.k]||{}).allegati||[])) if(r.origine === "personale"){ r.origine = "centrale"; r.consolidatoIl = nowISO(); n++; } return n; }
-  async share(){ return {value:[]}; }
+  async share(rec){ return {link:"https://esempio.invalid/collegamento-dimostrativo/" + rec.id}; }
+  async findImportabili(){ return []; }
 }
 function demoSeed(){
   const dAgo = n => { const d = new Date(Date.now() - n*86400000); return new Date(d - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
@@ -533,7 +570,8 @@ function viewCruscotto(app){
   const rows = open.map(r => ({r, a:alertsOf(r), idle:daysSince(lastActivity(r)), age:daysSince((r.fasi.evento||{}).dataEvento)}))
     .sort((x,y) => (y.a.length - x.a.length) || (y.idle - x.idle));
   app.innerHTML = `
-  <h2>Cruscotto dei processi in itinere</h2>
+  <div class="row" style="justify-content:space-between;align-items:center"><h2>Cruscotto dei processi in itinere</h2><button class="btn sec sm" id="reloadC">Aggiorna dati</button></div>
+  ${(S.importabili||[]).length ? `<div class="warnbox"><b>Fascicoli fuori dall'archivio centrale.</b> Nel suo OneDrive sono presenti ${S.importabili.length} fascicoli (${S.importabili.map(x => esc(x.nome)).join(", ")}) creati in un archivio personale e quindi non visibili agli altri utenti. <button class="btn sm" id="impBtn">Importa nell'archivio centrale</button></div>` : ""}
   <div class="kpis">
     <div class="kpi"><div class="v">${open.length}</div><div class="l">Sinistri in itinere</div></div>
     <div class="kpi alert"><div class="v">${alr.length}</div><div class="l">In alert (fermi oltre ${soglia()} gg o bloccati)</div></div>
@@ -553,6 +591,21 @@ function viewCruscotto(app){
   <p class="hint">Alert rosso: nessun avanzamento registrato da oltre ${soglia()} giorni su un fascicolo non chiuso. Alert arancione: fascicolo dichiarato bloccato da un collaboratore (motivo visibile passando sul badge).</p>
   </div>`;
   app.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => location.hash = "#/sinistro/" + encodeURIComponent(tr.dataset.id));
+  $("#reloadC").onclick = async () => { await carica(); render(); };
+  const ib = $("#impBtn"); if(ib) ib.onclick = importaTutti;
+}
+async function importaTutti(){
+  if(!confirm(`Copiare ${S.importabili.length} fascicoli nell'archivio centrale? Le cartelle originali nel suo OneDrive saranno rinominate con il suffisso _IMPORTATO.`)) return;
+  busy(true); let ok = 0, ren = [], err = [];
+  const existing = new Set(S.recs.map(r => r.id));
+  for(const it of S.importabili){
+    try { const r = await S.store.importa(it, existing); existing.add(r.saved.id); ok++; if(r.rinominato) ren.push(`${it.nome} → ${r.saved.id}`); }
+    catch(e){ err.push(`${it.nome}: ${errMsg(e)}`); }
+  }
+  busy(false);
+  S.importabili = []; await carica(); render();
+  toast(`Fascicoli importati: ${ok}.` + (ren.length ? ` Rinominati per omonimia (verificare eventuali duplicati): ${ren.join("; ")}.` : ""));
+  if(err.length) toast("Non importati: " + err.join(" | "), "err");
 }
 
 /* ---------------- Archivio e ricerca ---------------- */
@@ -766,16 +819,16 @@ function shareHTML(rec){
   const a = rec.fasi.assicurazione || {}, pe = rec.fasi.perizia || {};
   const sugg = [a.emailCompagnia, a.emailAvvocato, pe.emailPerito].filter(Boolean).join(", ");
   return `<div class="card"><h3>Condivisione con assicurazione, legale e perito</h3>
-   <p class="small muted">Invia un invito di OneDrive alla cartella <code>\\SINISTRI\\${esc(rec.id)}</code> (con il file RIEPILOGO.html sempre aggiornato). Il destinatario deve autenticarsi; per gli indirizzi esterni all'organizzazione la condivisione esterna deve essere abilitata dall'amministratore del tenant.</p>
+   <p class="small muted">Crea un collegamento alla cartella <code>\\SINISTRI\\${esc(rec.id)}</code> (con il file RIEPILOGO.html sempre aggiornato) valido <b>solo per i destinatari indicati</b>, che all'apertura verificano la propria identità con un codice inviato da Microsoft al loro indirizzo. Il collegamento va poi trasmesso con la posta aziendale o la PEC, così che le risposte giungano a una casella presidiata. Per gli indirizzi esterni la condivisione esterna di OneDrive deve essere abilitata nel tenant.</p>
    ${hasPersonal(rec) ? `<div class="warnbox">Alcuni documenti si trovano ancora nel OneDrive personale dei collaboratori e non sono visibili ai destinatari esterni. Consolidarli prima di condividere. <button class="btn sec sm" id="cons">Consolida ora nell'archivio centrale</button></div>` : ""}
    <div class="grid">
      <label class="fld wide"><span>Destinatari (e-mail separate da virgola)</span><input id="shTo" value="${esc(sugg)}"></label>
      <label class="fld"><span>Permesso</span><select id="shRole"><option value="read">Sola lettura</option><option value="write">Lettura e caricamento documenti</option></select></label>
      <label class="fld"><span>Scadenza accesso (facoltativa)</span><input type="date" id="shExp" min="${todayISO()}"></label>
-     <label class="fld wide"><span>Messaggio</span><input id="shMsg" value="Sanitaservice ASL LE – documentazione relativa al sinistro ${esc(rec.codice||rec.id)}."></label>
    </div>
-   <div class="row" style="margin-top:10px"><button class="btn" id="shGo">Invia invito</button></div>
-   ${(rec.condivisioni||[]).length ? `<table style="margin-top:12px"><thead><tr><th>Data</th><th>Destinatari</th><th>Permesso</th><th>Scadenza</th><th>Da</th></tr></thead><tbody>${rec.condivisioni.map(c => `<tr><td>${fmtDT(c.ts)}</td><td>${esc(c.a.join(", "))}</td><td>${c.ruolo==="write"?"Lettura e caricamento":"Sola lettura"}</td><td>${fmtD(c.scadenza)}</td><td class="muted">${esc(c.da)}</td></tr>`).join("")}</tbody></table>` : ""}
+   <div class="row" style="margin-top:10px"><button class="btn" id="shGo">Crea collegamento</button></div>
+   <div id="shOut"></div>
+   ${(rec.condivisioni||[]).length ? `<table style="margin-top:12px"><thead><tr><th>Data</th><th>Destinatari</th><th>Permesso</th><th>Scadenza</th><th>Da</th><th>Collegamento</th></tr></thead><tbody>${rec.condivisioni.map((c,i) => `<tr><td>${fmtDT(c.ts)}</td><td>${esc(c.a.join(", "))}</td><td>${c.ruolo==="write"?"Lettura e caricamento":"Sola lettura"}</td><td>${fmtD(c.scadenza)}</td><td class="muted">${esc(c.da)}</td><td>${c.link?`<button class="btn sec sm" data-mail="${i}">Testo e-mail</button>`:"—"}</td></tr>`).join("")}</tbody></table>` : ""}
   </div>`;
 }
 function bindShare(rec){
@@ -783,16 +836,35 @@ function bindShare(rec){
   $("#shGo").onclick = async () => {
     const to = $("#shTo").value.split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
     if(!to.length || to.some(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x))) return toast("Indicare indirizzi e-mail validi.", "err");
-    const role = $("#shRole").value, exp = $("#shExp").value, msg = $("#shMsg").value;
-    if(!confirm(`Inviare l'invito di accesso al fascicolo ${rec.id} a: ${to.join(", ")} (${role==="write"?"lettura e caricamento":"sola lettura"})?`)) return;
-    busy(true);
-    try { await S.store.share(rec, to, role, exp, msg); }
-    catch(e){ busy(false); return toast("Invito non riuscito: " + errMsg(e), "err"); }
+    const role = $("#shRole").value, exp = $("#shExp").value;
+    if(!confirm(`Creare il collegamento al fascicolo ${rec.id} riservato a: ${to.join(", ")} (${role==="write"?"lettura e caricamento":"sola lettura"})?`)) return;
+    busy(true); let r;
+    try { r = await S.store.share(rec, to, role, exp); }
+    catch(e){ busy(false); const m = errMsg(e); $("#shOut").innerHTML = `<div class="errbox"><b>Collegamento non creato.</b> ${esc(m)}<br>Se il messaggio richiama la condivisione esterna o i criteri di condivisione, l'amministratore del tenant deve abilitare la condivisione esterna di OneDrive almeno per "Utenti guest nuovi ed esistenti".</div>`; return toast("Collegamento non creato.", "err"); }
     busy(false);
+    if(!r || !r.link) return toast("Collegamento creato ma indirizzo non restituito: verificare in OneDrive, Gestisci accesso.", "err");
     const t = nowISO();
-    await persist(rec.id, nr => { (nr.condivisioni = nr.condivisioni || []).push({ts:t, da:S.me.email, a:to, ruolo:role, scadenza:exp||""});
-      nr.storico.push({ts:t, da:S.me.email, azione:`Fascicolo condiviso con ${to.join(", ")} (${role==="write"?"lettura e caricamento":"sola lettura"})`}); }, "Invito inviato.");
+    const saved = await persist(rec.id, nr => { (nr.condivisioni = nr.condivisioni || []).push({ts:t, da:S.me.email, a:to, ruolo:role, scadenza:exp||"", link:r.link});
+      nr.storico.push({ts:t, da:S.me.email, azione:`Creato collegamento riservato a ${to.join(", ")} (${role==="write"?"lettura e caricamento":"sola lettura"}${exp?", scadenza "+fmtD(exp):""})`}); }, "Collegamento creato.");
+    if(saved) mostraMail(saved, saved.condivisioni.length - 1);
   };
+  document.querySelectorAll("[data-mail]").forEach(b => b.onclick = () => mostraMail(rec, +b.dataset.mail));
+}
+function testoMail(rec, c){
+  const e = rec.fasi.evento || {};
+  return `Oggetto: Sanitaservice ASL LE – sinistro ${rec.codice || rec.id} – accesso alla documentazione\n\n`
+   + `Si trasmette il collegamento alla documentazione relativa al sinistro del ${fmtD(e.dataEvento)} che ha coinvolto il veicolo targato ${e.targa || ""}:\n\n${c.link}\n\n`
+   + `Il collegamento è personale e utilizzabile esclusivamente dall'indirizzo e-mail al quale è destinato (${c.a.join(", ")}): all'apertura sarà richiesto un codice di verifica, inviato automaticamente da Microsoft al medesimo indirizzo.`
+   + `${c.scadenza ? ` L'accesso è consentito fino al ${fmtD(c.scadenza)}.` : ""} Permesso: ${c.ruolo === "write" ? "consultazione e caricamento di documenti" : "sola consultazione"}.\n\n`
+   + `La documentazione contiene dati personali, da trattare esclusivamente per la gestione del sinistro.\n\nPer ogni comunicazione si prega di rispondere al presente messaggio.\n\nCordiali saluti`;
+}
+function mostraMail(rec, i){
+  const c = rec.condivisioni[i], txt = testoMail(rec, c), out = $("#shOut"); if(!out) return;
+  const sub = txt.split("\n")[0].replace(/^Oggetto: /, ""), body = txt.split("\n").slice(2).join("\n");
+  out.innerHTML = `<div class="infobox"><b>Collegamento pronto.</b> Lo trasmetta ai destinatari con la posta aziendale o la PEC, ad esempio con il testo seguente:<textarea id="mailTxt" rows="12" style="margin-top:8px">${esc(txt)}</textarea>
+   <div class="row" style="margin-top:8px"><button class="btn sm" id="cpMail">Copia testo</button><a class="btn sec sm" href="mailto:${encodeURIComponent(c.a.join(","))}?subject=${encodeURIComponent(sub)}&body=${encodeURIComponent(body)}">Apri nel programma di posta</a></div></div>`;
+  $("#cpMail").onclick = async () => { try { await navigator.clipboard.writeText($("#mailTxt").value); toast("Testo copiato."); } catch(_){ $("#mailTxt").select(); document.execCommand("copy"); toast("Testo copiato."); } };
+  out.scrollIntoView({behavior:"smooth", block:"center"});
 }
 async function consolida(id, auto){
   const rec = S.recs.find(r => r.id === id); const nr = clone(rec); nr._m = rec._m; nr._etag = rec._etag;
@@ -817,11 +889,11 @@ function viewImpostazioni(app){
       <td><select data-u="${i}" data-k="ruolo">${Object.entries(ROLES).map(([k,l]) => `<option value="${k}" ${u.ruolo===k?"selected":""}>${l}</option>`).join("")}</select></td>
       ${PHASES.map(p => `<td style="text-align:center"><input type="checkbox" style="width:auto" data-u="${i}" data-ph="${p.k}" ${u.ruolo!=="IST"?"disabled":""} ${(u.ruolo==="AMM"||u.ruolo==="RESP"||(u.fasi||[]).includes(p.k))?"checked":""}></td>`).join("")}
       <td style="text-align:center"><input type="checkbox" style="width:auto" data-u="${i}" data-k="attivo" ${u.attivo!==false?"checked":""}></td>
-      <td>${u.email !== S.me.email ? `<button class="btn sec sm" data-rm="${i}">Elimina</button>` : ""}</td></tr>`).join("")}
+      <td style="white-space:nowrap">${!DEMO && u.email !== S.me.email && !u.nuovo ? `<button class="btn sec sm" data-gr="${i}" title="Concede (o riconcede) l'accesso alla cartella SINISTRI">Concedi accesso</button> ` : ""}${u.email !== S.me.email ? `<button class="btn sec sm" data-rm="${i}">Elimina</button>` : ""}</td></tr>`).join("")}
     </tbody></table>
     <p class="hint">F1–F7: ${PHASES.map((p,i) => `F${i+1} ${esc(p.t)}`).join(" · ")}</p>
     <div class="row" style="margin-top:10px"><button class="btn sec" id="addU">+ Aggiungi collaboratore</button><button class="btn" id="saveU">Salva utenti</button></div>
-    ${DEMO ? "" : `<p class="hint">Al salvataggio, ai nuovi collaboratori viene inviato l'invito di OneDrive alla cartella SINISTRI (modifica; sola lettura per il profilo Consultazione). La revoca dell'accesso alla cartella si effettua da OneDrive, "Gestisci accesso".</p>`}
+    ${DEMO ? "" : `<p class="hint">Al salvataggio, ai nuovi collaboratori viene concesso l'accesso alla cartella SINISTRI (modifica; sola lettura per il profilo Consultazione), senza invio di e-mail. Il pulsante "Concedi accesso" ripete l'operazione per un collaboratore già censito. La revoca si effettua da OneDrive, "Gestisci accesso".</p>`}
     </div>
     <div class="card"><h3>Impostazioni</h3><div class="grid">
       <label class="fld"><span>Soglia alert (giorni senza avanzamento)</span><input type="number" min="1" id="soglia" value="${soglia()}"></label>
@@ -832,6 +904,9 @@ function viewImpostazioni(app){
       if(el.dataset.ph){ u.fasi = u.fasi || []; if(el.checked) u.fasi.push(el.dataset.ph); else u.fasi = u.fasi.filter(x => x !== el.dataset.ph); }
       else if(el.dataset.k === "attivo") u.attivo = el.checked;
       else { u[el.dataset.k] = el.dataset.k === "email" ? el.value.trim().toLowerCase() : el.value.trim(); if(el.dataset.k === "ruolo") draw(); } });
+    app.querySelectorAll("[data-gr]").forEach(b => b.onclick = async () => { const u = U[+b.dataset.gr]; busy(true);
+      try { await S.store.grantArchive(u); toast(`Accesso alla cartella SINISTRI concesso a ${u.email} (${u.ruolo === "CONS" ? "lettura" : "modifica"}).`); }
+      catch(e){ toast(`Accesso non concesso a ${u.email}: ${errMsg(e)}`, "err"); } finally { busy(false); } });
     app.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { if(confirm("Eliminare il collaboratore dall'applicazione?")){ U.splice(+b.dataset.rm, 1); draw(); } });
     $("#addU").onclick = () => { U.push({nome:"", email:"", ruolo:"IST", fasi:[], attivo:true, nuovo:true}); draw(); };
     $("#saveU").onclick = async () => {
@@ -862,6 +937,7 @@ function viewSetup(){
   nav(); userbox(); $("#nav").innerHTML = "";
   $("#app").innerHTML = `<h2>Configurazione iniziale dell'archivio</h2><div class="card">
    <p>L'archivio non è ancora configurato. Questa operazione va eseguita <b>una sola volta</b> dal titolare della cartella <code>SINISTRI</code> (account Microsoft 365 aziendale).</p>
+   <div class="errbox"><b>Se lei è un collaboratore e non il titolare dell'archivio, non proceda:</b> creerebbe un archivio separato, non visibile agli altri. Segnali all'amministratore che i valori dell'archivio non sono stati inseriti nel file.</div>
    <ol><li>Premere il pulsante: la cartella <code>SINISTRI</code> viene individuata o creata nella radice del proprio OneDrive.</li>
    <li>Copiare i due valori nel blocco <code>CONFIG.archivio</code> del file e ripubblicarlo, così che tutti i collaboratori puntino allo stesso archivio.</li>
    <li>Al primo accesso il titolare viene registrato come Amministratore e può censire i collaboratori.</li></ol>
@@ -869,7 +945,7 @@ function viewSetup(){
   $("#mk").onclick = async () => { busy(true);
     try { const r = await S.store.setupMyFolder();
       $("#out").innerHTML = `<div class="infobox">Cartella: <a href="${esc(r.webUrl)}" target="_blank" rel="noopener">${esc(r.webUrl)}</a><br><code>archivio: { driveId: "${esc(r.driveId)}", folderId: "${esc(r.folderId)}" }</code></div>
-        <button class="btn sec" id="use">Usa questi valori in questo browser (prova)</button>`;
+        <p class="hint">Riportare la riga nel blocco CONFIG del file index.html e ripubblicarlo. Il pulsante seguente vale solo per una prova su questo browser e non rende l'archivio visibile agli altri utenti.</p><button class="btn sec" id="use">Usa questi valori solo in questo browser (prova)</button>`;
       $("#use").onclick = () => { try { localStorage.setItem("sinistri_archivio", JSON.stringify({driveId:r.driveId, folderId:r.folderId})); } catch(e){} location.reload(); };
     } catch(e){ toast(errMsg(e), "err"); } finally { busy(false); } };
 }
@@ -890,7 +966,9 @@ async function start(){
     S.cfg = await S.store.loadConfig();
     if(!S.cfg){ userbox(); return viewPrimoAvvio(); }
     S.user = S.cfg.utenti.find(u => u.email === S.me.email && u.attivo !== false) || null;
+    if(ARCH_LOCALE) $("#demobar").innerHTML = `<div class="demo" style="background:#fde8e6;color:#7a1a12;border-color:#f3b8b1"><b>Attenzione: l'archivio è impostato solo in questo browser</b> e non è condiviso con gli altri utenti, che vedono ciascuno un archivio diverso. Inserire nel blocco CONFIG del file index.html la riga: <code>archivio: { driveId: "${esc(CONFIG.archivio.driveId)}", folderId: "${esc(CONFIG.archivio.folderId)}" },</code></div>`;
     if(S.user) await carica();
+    if(S.user && S.user.ruolo !== "CONS" && S.store.findImportabili) S.store.findImportabili().then(l => { S.importabili = l; if(l.length && (location.hash === "#/cruscotto" || !location.hash)) render(); }).catch(() => {});
     if(!location.hash) location.hash = "#/cruscotto"; else render();
   } catch(e){ $("#app").innerHTML = `<div class="card errbox"><b>Avvio non riuscito.</b> ${esc(errMsg(e))}</div>`; }
 }
