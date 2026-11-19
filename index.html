@@ -297,6 +297,9 @@ class GraphStore {
     const it = await this.putJson(`/drives/${this.d}/items/${rec._m.fileId}/content`, strip(rec), rec._etag);
     const out = {...rec, _etag:it.eTag}; this.writeSummary(out); return out;
   }
+  async rinomina(rec, nuovoNome){ // rinomina la cartella del fascicolo; 409 se il nome è già in uso
+    await this.api(`/drives/${this.d}/items/${rec._m.folderItemId}?@microsoft.graph.conflictBehavior=fail`, {method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({name:nuovoNome})});
+  }
   writeSummary(rec){ // riepilogo leggibile per assicurazione e legale (best effort)
     this.api(`/drives/${this.d}/items/${rec._m.folderItemId}:/RIEPILOGO.html:/content`, {method:"PUT", headers:{"Content-Type":"text/html"}, body: summaryHTML(rec)}).catch(()=>{});
   }
@@ -431,6 +434,8 @@ class DemoStore {
   async listSinistri(){ return Object.values(this.db.sinistri).map(r => ({...clone(r.data), _etag:r.etag, _m:{}})); }
   async createSinistro(rec){ let name = rec.id, i = 2; while(this.db.sinistri[name]) name = `${rec.id}_${i++}`; rec.id = name; rec.codice = "SIN-" + name;
     this.db.sinistri[name] = {data:strip(rec), etag:"1"}; this.persist(); return {...rec, _etag:"1", _m:{}}; }
+  async rinomina(rec, nuovoNome){ if(this.db.sinistri[nuovoNome]){ const e = new Error("nome già in uso"); e.status = 409; throw e; }
+    this.db.sinistri[nuovoNome] = this.db.sinistri[rec.id]; delete this.db.sinistri[rec.id]; this.persist(); }
   async saveSinistro(rec){ const cur = this.db.sinistri[rec.id];
     if(cur.etag !== rec._etag){ const e = new Error("conflitto"); e.status = 412; throw e; }
     cur.etag = String(+cur.etag + 1); cur.data = strip(rec); this.persist(); return {...rec, _etag:cur.etag}; }
@@ -730,6 +735,7 @@ function viewSinistro(app, id){
     </div>
     <div class="row" style="margin-left:auto">
       ${rec._m && rec._m.webUrl ? `<a class="btn sec sm" href="${esc(rec._m.webUrl)}" target="_blank" rel="noopener">Apri cartella OneDrive</a>` : ""}
+      ${isMgr(S.user) && !isClosed(rec) ? `<button class="btn sec sm" id="corrId">Correggi data, ora o targa</button>` : ""}
       ${(isMgr(S.user) || canEdit(S.user, k)) && !isClosed(rec) ? `<button class="btn ${rec.blocco&&rec.blocco.attivo?"sec":"warn"} sm" id="blocco">${rec.blocco&&rec.blocco.attivo?"Rimuovi blocco":"Segnala blocco"}</button>` : ""}
     </div></div></div>
   <div class="layout">
@@ -761,6 +767,7 @@ function viewSinistro(app, id){
   app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const a = f.allegati[+b.dataset.del]; if(confirm(`Rimuovere "${a.name}" dal fascicolo? Il file resta su OneDrive.`)) salvaFase(id, k, "save", {remove:+b.dataset.del}); });
   const fi = $("#files"); if(fi) fi.onchange = () => caricaFile(id, k, [...fi.files]);
   const bl = $("#blocco"); if(bl) bl.onclick = () => toggleBlocco(id);
+  const ci = $("#corrId"); if(ci) ci.onclick = () => formCorrezione(id);
   const addp = $("#addPrev"); if(addp) addp.onclick = () => { $("#prev tbody").insertAdjacentHTML("beforeend", prevRow({}, true)); };
   if(isMgr(S.user)) bindShare(rec);
 }
@@ -818,6 +825,46 @@ async function caricaFile(id, k, files){
   catch(e){ toast("Caricamento non riuscito: " + errMsg(e), "err"); }
   finally { busy(false); }
   if(refs.length) await salvaFase(id, k, "save", {add:refs});
+}
+function formCorrezione(id){
+  const rec = S.recs.find(r => r.id === id), e = rec.fasi.evento || {};
+  const box = document.createElement("div"); box.className = "card";
+  box.innerHTML = `<h3>Correzione dei dati identificativi</h3>
+   <p class="small muted">Data, ora e targa determinano il nome della cartella (<code>AAAAMMGG-TARGA</code>): la correzione rinomina la cartella del fascicolo nell'archivio e resta annotata nello storico. I documenti già caricati non subiscono modifiche.</p>
+   <div class="grid"><label class="fld"><span>Data evento</span><input type="date" id="cDa" max="${todayISO()}" value="${esc(e.dataEvento)}"></label>
+   <label class="fld"><span>Ora evento</span><input type="time" id="cOr" value="${esc(e.oraEvento)}"></label>
+   <label class="fld"><span>Targa</span><input id="cTa" value="${esc(e.targa)}"></label>
+   <label class="fld wide"><span>Motivo della correzione</span><input id="cMo" placeholder="es. errore materiale di digitazione della targa"></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn" id="cOk">Applica correzione</button><button class="btn sec" id="cNo">Annulla</button></div>`;
+  $("#app").prepend(box); box.scrollIntoView({behavior:"smooth"});
+  $("#cTa").addEventListener("input", ev => { ev.target.value = ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
+  $("#cNo").onclick = () => box.remove();
+  $("#cOk").onclick = async () => {
+    const da = $("#cDa").value, or = $("#cOr").value, ta = $("#cTa").value.trim(), mo = $("#cMo").value.trim();
+    if(!da || !or || !ta) return toast("Data, ora e targa sono obbligatorie.", "err");
+    if(da > todayISO()) return toast("La data dell'evento non può essere futura.", "err");
+    if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(or)) return toast("Ora non valida (formato 24 ore HH:MM).", "err");
+    if(!mo) return toast("Indicare il motivo della correzione.", "err");
+    if(da === e.dataEvento && or === e.oraEvento && ta === e.targa) return toast("Nessuna modifica rispetto ai dati attuali.", "err");
+    if(!/^[A-Z]{2}\d{3}[A-Z]{2}$/.test(ta) && !confirm("La targa non rispetta il formato AA000AA. Confermare?")) return;
+    const base = da.replace(/-/g, "") + "-" + ta;
+    let nuovo = id;
+    if(!id.startsWith(base)){ nuovo = base; let i = 2; while(S.recs.some(r => r.id === nuovo)) nuovo = `${base}_${i++}`; }
+    if(nuovo !== base && nuovo !== id && !confirm(`Esiste già un fascicolo ${base}: la cartella sarà rinominata ${nuovo}. Verificare che non si tratti di un duplicato. Procedere?`)) return;
+    if(!confirm(`Confermare la correzione?\nData: ${fmtD(e.dataEvento)} → ${fmtD(da)}\nOra: ${e.oraEvento} → ${or}\nTarga: ${e.targa} → ${ta}${nuovo !== id ? `\nCartella: ${id} → ${nuovo}` : ""}`)) return;
+    const vecchio = {d:e.dataEvento, o:e.oraEvento, t:e.targa};
+    busy(true);
+    try { if(nuovo !== id) await S.store.rinomina(rec, nuovo); }
+    catch(err){ busy(false); return toast((err.status === 409 ? "Nome di cartella già in uso: " : "Rinomina non riuscita: ") + errMsg(err), "err"); }
+    busy(false);
+    if(nuovo !== id){ rec.id = nuovo; S.sel[nuovo] = S.sel[id]; }
+    const t = nowISO();
+    const saved = await persist(nuovo, nr => {
+      nr.codice = "SIN-" + nuovo; Object.assign(nr.fasi.evento, {dataEvento:da, oraEvento:or, targa:ta});
+      nr.storico.push({ts:t, da:S.me.email, azione:`Correzione dati identificativi (${mo}): data ${fmtD(vecchio.d)} → ${fmtD(da)}, ora ${vecchio.o} → ${or}, targa ${vecchio.t} → ${ta}${nuovo !== id ? `; cartella rinominata da ${id} a ${nuovo}` : ""}`});
+    }, "Correzione applicata.");
+    if(saved && nuovo !== id) location.hash = "#/sinistro/" + encodeURIComponent(nuovo);
+  };
 }
 async function toggleBlocco(id){
   const rec = S.recs.find(r => r.id === id), on = rec.blocco && rec.blocco.attivo;
